@@ -136,16 +136,27 @@ class EngineManager(
     fun environment(): BackendEnvironment = BackendEnvironment.probe(appContext)
 
     fun backendOptions(model: LocalModel): List<BackendOption> =
-        BackendCapabilities.options(model.format, model.fileName, environment(), engineFor(model))
+        BackendCapabilities.options(model.format, model.fileName, environment())
 
     /**
-     * 2.2.0: which engine runs [model]: GenieX for AI Hub QAIRT folders and for GGUF files set to
-     * GenieX (per model or as the default GGUF engine) when this build has it; llama.cpp otherwise.
+     * 2.2.0: which engine runs [model]. QAIRT folders: always GenieX. 2.1.3: GGUF follows the
+     * backend ([com.iris.localai.engine.geniex.GgufEngineRule]): NPU → GenieX when it is usable,
+     * GPU / CPU → llama.cpp. [backend] defaults to the backend a load starts with.
      */
-    fun engineFor(model: LocalModel, cfg: com.iris.localai.data.EffectiveModelConfig = effective(model)): String = when {
-        model.format == ModelFormat.QAIRT -> com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX
-        model.format == ModelFormat.GGUF && cfg.engine == com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX &&
-            EngineFactory.geniex(appContext) != null -> com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX
+    fun engineFor(
+        model: LocalModel,
+        cfg: com.iris.localai.data.EffectiveModelConfig = effective(model),
+        backend: Backend? = null,
+        options: List<BackendOption>? = null,
+    ): String = when (model.format) {
+        ModelFormat.QAIRT -> com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX
+        ModelFormat.GGUF -> {
+            val opts = options ?: backendOptions(model)
+            val b = backend ?: BackendCapabilities.preferred(cfg.backend, model.format, model.fileName, opts)
+            com.iris.localai.engine.geniex.GgufEngineRule.engineFor(
+                b, hasGeniex && opts.any { it.backend == Backend.NPU && it.available },
+            )
+        }
         else -> com.iris.localai.engine.geniex.GenieX.ENGINE_LLAMA
     }
 
@@ -335,7 +346,7 @@ class EngineManager(
                 for (backend in chain) {
                     if (abandoned()) break
                     plan = threadPolicy.plan(useTier, cfg.threads, backend)
-                    e = EngineFactory.create(appContext, model.format, engineFor(model, cfg))
+                    e = EngineFactory.create(appContext, model.format, engineFor(model, cfg, backend, options))
                     crashMemory.arm(model.id, backend)
                     if (!abandoned()) _state.value = EngineState.Loading(model, (_state.value as? EngineState.Loading)?.progress ?: 0f, since, applyingTier, backend)
                     val loadStart = System.currentTimeMillis()

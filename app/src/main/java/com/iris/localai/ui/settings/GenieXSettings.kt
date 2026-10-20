@@ -17,35 +17,29 @@ import androidx.compose.ui.platform.LocalContext
 import com.iris.localai.engine.NpuState
 import com.iris.localai.engine.geniex.GenieX
 import com.iris.localai.engine.geniex.GenieXSupport
-import com.iris.localai.ui.components.Divider
 import com.iris.localai.ui.components.GroupFootnote
 import com.iris.localai.ui.components.IrisButton
 import com.iris.localai.ui.components.IrisButtonStyle
 import com.iris.localai.ui.components.IrisDialog
 import com.iris.localai.ui.components.IrisProgressBar
 import com.iris.localai.ui.components.SectionTitle
-import com.iris.localai.ui.components.SegmentedRow
 import com.iris.localai.ui.components.SettingsGroup
 import com.iris.localai.ui.components.SettingsRow
 import com.iris.localai.ui.theme.Iris
 import com.iris.localai.ui.theme.IrisDimens
 import com.iris.localai.ui.theme.IrisType
 
-/** 2.2.0, 设置 › 模型与后端 › GenieX (full flavour): default GGUF engine + the downloadable runtime. */
+/**
+ * 2.2.0, 设置 › 模型与后端 › GenieX (full flavour): the downloadable runtime.
+ * 2.1.3: the global GGUF engine switch is gone — a GGUF model on the NPU runs on GenieX, on GPU / CPU on llama.cpp.
+ */
 @Composable
-internal fun GenieXSection(vm: SettingsViewModel, gx: GenieXSupport, ggufEngine: String) {
+internal fun GenieXSection(vm: SettingsViewModel, gx: GenieXSupport) {
     SectionTitle("GenieX（高通）")
     SettingsGroup {
-        SegmentedRow(
-            "GGUF 默认引擎", listOf("llama.cpp", "GenieX"),
-            if (ggufEngine == GenieX.ENGINE_GENIEX) 1 else 0,
-            { i -> vm.setGgufEngine(if (i == 1) GenieX.ENGINE_GENIEX else GenieX.ENGINE_LLAMA) },
-            subtitle = "GenieX 可在 NPU（Hexagon，默认）/ GPU / CPU 上运行 GGUF，Q4_0 在 NPU 上最好；每个模型也可在模型设置里单独选。重新加载模型后生效",
-        )
-        Divider()
         GenieXRuntimeRow(gx, onInstall = vm::installGeniex, onCancel = vm::cancelGeniex, onDelete = vm::deleteGeniex)
     }
-    GroupFootnote("AI Hub QAIRT 包（含 genie_config.json、tokenizer.json 和 .bin 的文件夹）放进模型目录或用「导入文件夹」即可，只能在 NPU 上运行。")
+    GroupFootnote("GGUF 模型选 NPU 时用 GenieX 运行。AI Hub QAIRT 包（含 genie_config.json、tokenizer.json 和 .bin 的文件夹）放进模型目录或用「导入文件夹」即可，只能在 NPU 上运行。")
 }
 
 @Composable

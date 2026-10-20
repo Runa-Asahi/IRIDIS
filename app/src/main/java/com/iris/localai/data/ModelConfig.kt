@@ -43,7 +43,7 @@ data class ModelOverrides(
     val thinking: Boolean? = null,
     /** Replaces the global 自定义指令 for this model when non-null. */
     val systemPrompt: String? = null,
-    /** 2.2.0, GGUF only: "llama" / "geniex"; null = AppSettings.ggufEngine. */
+    /** 2.2.0, GGUF only: "llama" / "geniex". 2.1.3: no longer chosen; old values are migrated ([com.iris.localai.engine.geniex.GgufEngineRule.migrate]). */
     val engine: String? = null,
 ) {
     val isEmpty: Boolean get() = this == ModelOverrides()
@@ -142,7 +142,7 @@ class ModelConfigRepository(context: Context) {
     fun get(modelId: String?): ModelOverrides = modelId?.let { _configs.value[it] } ?: ModelOverrides()
 
     fun update(modelId: String, block: (ModelOverrides) -> ModelOverrides) = synchronized(lock) {
-        val next = block(get(modelId)).sanitized()
+        val next = com.iris.localai.engine.geniex.GgufEngineRule.migrate(block(get(modelId)).sanitized())
         val map = _configs.value.toMutableMap()
         if (next.isEmpty) map.remove(modelId) else map[modelId] = next
         if (map == _configs.value) return@synchronized
@@ -153,7 +153,10 @@ class ModelConfigRepository(context: Context) {
     fun reset(modelId: String) = update(modelId) { ModelOverrides() }
 
     private fun read(): Map<String, ModelOverrides> = runCatching {
-        if (!file.isFile) emptyMap() else json.decodeFromString(serializer, file.readText()).mapValues { it.value.sanitized() }
+        if (!file.isFile) emptyMap() else json.decodeFromString(serializer, file.readText())
+            // 2.1.3: an old per-model 「推理引擎」 is read once and folded into the backend.
+            .mapValues { com.iris.localai.engine.geniex.GgufEngineRule.migrate(it.value.sanitized()) }
+            .filterValues { !it.isEmpty }
     }.getOrDefault(emptyMap())
 
     private fun write(map: Map<String, ModelOverrides>) {

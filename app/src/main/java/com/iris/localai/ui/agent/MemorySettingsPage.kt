@@ -63,7 +63,13 @@ object MemoryText {
 }
 
 @Composable
-fun MemorySettingsPage(onBack: () -> Unit) {
+fun MemorySettingsPage(
+    onBack: () -> Unit,
+    /** 2.1.3: 「上下文与记忆」 and 「记忆」 are one page, 「记忆与上下文」 (the context sections come first). */
+    title: String = "记忆与上下文",
+    actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
+    header: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {},
+) {
     val context = LocalContext.current
     val agent = remember { (context.applicationContext as IrisApp).container.agent }
     val ms by agent.memorySettings.settings.collectAsStateWithLifecycle()
@@ -79,8 +85,9 @@ fun MemorySettingsPage(onBack: () -> Unit) {
         value = withContext(Dispatchers.IO) { agent.history?.let { runCatching { it.count() to it.ftsVersion.uppercase() }.getOrNull() } }
     }
 
-    SubpageScaffold("记忆", onBack) {
+    SubpageScaffold(title, onBack, actions = actions) {
         ScrollBody {
+            header()
             SectionTitle("长期记忆")
             SettingsGroup {
                 SwitchRow("长期记忆", ms.enabled, subtitle = MemoryText.MASTER, icon = com.iris.localai.ui.icons.IrisIcons.Memory) { on ->

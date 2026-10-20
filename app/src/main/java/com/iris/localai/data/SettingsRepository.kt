@@ -159,5 +159,13 @@ fun AppSettings.migrated(): AppSettings {
     }
     if (s.kvCacheType < 0) s = s.copy(kvCacheType = if (s.kvQuant) 1 else 0)
     if (s.visualEffects < 0) s = s.copy(visualEffects = if (s.glassEffects) 1 else 0)
+    // 2.1.3: 「GGUF 默认引擎 = GenieX」 is gone; the backend decides (NPU = GenieX). Keep the user's choice as the GGUF default backend.
+    if (com.iris.localai.engine.geniex.GenieX.parseEngine(s.ggufEngine) == com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX) {
+        val b = com.iris.localai.engine.geniex.GgufEngineRule.migrateDefaultBackend(s.ggufEngine, s.defaultBackends[ModelFormat.GGUF.name])
+        s = s.copy(
+            defaultBackends = if (b != null) s.defaultBackends + (ModelFormat.GGUF.name to b) else s.defaultBackends,
+            ggufEngine = com.iris.localai.engine.geniex.GenieX.ENGINE_LLAMA,
+        )
+    }
     return s
 }

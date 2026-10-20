@@ -90,7 +90,10 @@ object BackendCapabilities {
     fun options(format: ModelFormat, fileName: String, env: BackendEnvironment, engine: String? = null): List<BackendOption> {
         val noCl = "本机没有可用的 OpenCL 驱动"
         return when (format) {
-            ModelFormat.GGUF -> if (engine == com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX) {
+            // 2.1.3: no engine given (the normal case) → the backend decides the engine (NPU = GenieX).
+            ModelFormat.GGUF -> if (engine == null) {
+                com.iris.localai.engine.geniex.GgufEngineRule.options(env)
+            } else if (engine == com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX) {
                 com.iris.localai.engine.geniex.GenieXRules.ggufOptions(env)
             } else listOf(
                 BackendOption(Backend.CPU, true, detail = "llama.cpp · ARM KleidiAI"),
@@ -172,7 +175,8 @@ object BackendCapabilities {
     fun autoBackend(format: ModelFormat, fileName: String, options: List<BackendOption>, allowGpu: Boolean = true): Backend {
         val avail = options.filter { it.available }.map { it.backend }.toSet()
         val wanted = when {
-            Backend.NPU in avail -> Backend.NPU
+            // 2.1.3: GGUF 自动 stays on the CPU even when GenieX makes the NPU available (NPU is an explicit pick).
+            Backend.NPU in avail && format != ModelFormat.GGUF -> Backend.NPU
             format == ModelFormat.LITERT && allowGpu && !prefersCpu(fileName) && Backend.GPU in avail -> Backend.GPU
             else -> Backend.CPU
         }

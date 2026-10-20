@@ -92,7 +92,6 @@ import com.iris.localai.R
 import com.iris.localai.data.Role
 import com.iris.localai.engine.EngineState
 import com.iris.localai.server.ApiService
-import com.iris.localai.ui.components.IrisProgressBar
 import com.iris.localai.ui.components.PressableIcon
 import com.iris.localai.ui.components.pulse
 import com.iris.localai.ui.glass.GlassStyle
@@ -436,24 +435,8 @@ fun ChatScreen(
                     }
                     PressableIcon(Icons.Outlined.EditNote, "新对话", size = 40.dp, iconSize = 21.dp, background = capsuleBg, enabled = messages.isNotEmpty()) { vm.newChat() }
                 }
-                // Model loading: a hairline progress bar under the bar instead of a blocking spinner.
-                // Its 2 dp slot is always reserved: when it appeared/disappeared it changed the bar's
-                // measured height, and with it the list's top padding, so the messages jumped.
-                val loading = ui.engine as? EngineState.Loading
-                Box(Modifier.fillMaxWidth().height(2.dp)) {
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = loading != null,
-                        enter = fadeIn(IrisMotion.enter()),
-                        exit = fadeOut(IrisMotion.standard()),
-                    ) {
-                        val p = loading?.progress ?: 1f
-                        IrisProgressBar(
-                            progress = if (loading == null) 1f else p.takeIf { it > 0.01f && it <= 1f },
-                            height = 2.dp,
-                            track = c.outline.copy(alpha = 0.4f),
-                        )
-                    }
-                }
+                // 2.1.3: the hairline progress bar under the top bar is gone — the pill above the
+                // composer (with % and 「取消」) is the one place that shows a model load.
             }
 
             // ---- Performance overlay (opt-in, only while generating) ----
@@ -686,8 +669,8 @@ private fun ModelTitle(engine: EngineState, capsule: Boolean = false, onClick: (
         is EngineState.Ready -> engine.details.backend + if (engine.details.fallbackNote != null) " · 已回退" else ""
         // 2.0.x: no ticking seconds here — the activity line above the composer is the one place
         // that counts (and the title no longer recomposes every second while loading).
-        is EngineState.Loading -> engine.applyingTier?.let { t -> "正在应用资源档「${t.short}」" }
-            ?: com.iris.localai.engine.SlowLoadHint.subtitle(engine.backend, 0)
+        // 2.1.3: just 「加载中」 (no backend, no seconds); the pill above the composer has the details.
+        is EngineState.Loading -> com.iris.localai.engine.SlowLoadHint.subtitle(null, 0)
         is EngineState.Failed -> "加载失败，点按查看"
         EngineState.Idle -> "未加载模型"
     }

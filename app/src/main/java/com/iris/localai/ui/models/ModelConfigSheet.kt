@@ -72,11 +72,11 @@ fun ModelConfigSheet(model: LocalModel, onDismiss: () -> Unit) {
     val state by engine.state.collectAsStateWithLifecycle()
     val o = configs[model.id] ?: ModelOverrides()
     val eff = EffectiveModelConfig.resolve(settings, model.format, o)
-    val options = remember(model.id, configs, settings.ggufEngine) { engine.backendOptions(model) }
+    val options = remember(model.id, configs, settings.defaultBackends) { engine.backendOptions(model) }
     var crashTick by remember { mutableIntStateOf(0) }
     val crashed = remember(model.id, crashTick) { engine.crashMemory.crashed(model.id) }
-    // 2.2.0: GGUF can run on llama.cpp or Qualcomm GenieX (full flavour).
-    val engineId = engine.engineFor(model, eff)
+    // 2.2.0: GGUF can run on llama.cpp or Qualcomm GenieX (full flavour); 2.1.3: picked by the backend.
+    val engineId = engine.engineFor(model, eff, options = options)
     val features = BackendCapabilities.features(model.format, model.fileName, engine = engineId)
     val auto = BackendCapabilities.autoBackend(model.format, model.fileName, options, engine.threadPolicy.nominal(engine.tier).allowGpu)
     val loaded = (state as? EngineState.Ready)?.takeIf { it.model.path == model.path }
@@ -98,34 +98,7 @@ fun ModelConfigSheet(model: LocalModel, onDismiss: () -> Unit) {
                 modifier = Modifier.padding(horizontal = IrisDimens.pageGutter + 4.dp, vertical = 4.dp),
             )
 
-            // ---- 2.2.0: engine (GGUF, full flavour) ----
-            if (model.format == com.iris.localai.data.ModelFormat.GGUF && container.engine.hasGeniex) {
-                SectionTitle("引擎")
-                SettingsGroup {
-                    SegmentedRow(
-                        "推理引擎", listOf("跟随默认", "llama.cpp", "GenieX"),
-                        when (com.iris.localai.engine.geniex.GenieX.parseEngine(o.engine)) {
-                            com.iris.localai.engine.geniex.GenieX.ENGINE_LLAMA -> 1
-                            com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX -> 2
-                            else -> 0
-                        },
-                        { i ->
-                            set {
-                                it.copy(
-                                    engine = when (i) {
-                                        1 -> com.iris.localai.engine.geniex.GenieX.ENGINE_LLAMA
-                                        2 -> com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX
-                                        else -> null
-                                    },
-                                    backend = null,
-                                )
-                            }
-                        },
-                        subtitle = (if (engineId == com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX) "高通引擎，能用 NPU 加速" else "内置引擎，兼容性最好") +
-                            "。换引擎后重新加载生效",
-                    )
-                }
-            }
+            // 2.1.3: no 「推理引擎」 switch any more — for GGUF the backend decides (NPU = GenieX, GPU / CPU = 内置 llama.cpp).
 
             // ---- Backend ----
             SectionTitle("后端")

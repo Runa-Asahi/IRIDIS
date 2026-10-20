@@ -92,7 +92,8 @@ import kotlin.math.roundToInt
  * (plus the few one-tap items: theme, visual effects, delete all); each group is its own page,
  * with rarely used items folded under 「高级」. No storage key or default value changed.
  */
-enum class SettingsPage { APPEARANCE, HOME, MODEL_BACKEND, GENERATION, CONTEXT, PERFORMANCE, TIER_PROFILES, VOICE, API, ABOUT, DIAGNOSTICS, AGENT, MEMORY, STORAGE }
+/** 2.1.3: DEVELOPER = 开发者选项 (reached from 关于 IRIDIS); CONTEXT and MEMORY open the same 「记忆与上下文」 page. */
+enum class SettingsPage { APPEARANCE, HOME, MODEL_BACKEND, GENERATION, CONTEXT, PERFORMANCE, TIER_PROFILES, VOICE, API, ABOUT, DIAGNOSTICS, AGENT, MEMORY, STORAGE, DEVELOPER }
 
 private val THEME_OPTIONS = listOf(ThemeMode.SYSTEM to "跟随系统", ThemeMode.LIGHT to "浅色", ThemeMode.DARK to "深色")
 
@@ -101,6 +102,10 @@ object SettingsText {
     const val MODEL_BACKEND = "模型与默认后端"
     const val GENERATION = "指令、思考与采样"
     const val CONTEXT = "上下文长度与超出处理"
+    /** 2.1.3: one entry for the merged 记忆与上下文 page. */
+    const val MEMORY_CONTEXT = "上下文长度、长期记忆与压缩"
+    /** 2.1.3: 关于 IRIDIS › 开发者选项. */
+    const val DEVELOPER = "资源档配置、资源诊断与调试显示"
     const val PERFORMANCE = "资源档与功耗"
     const val VOICE = "识别与朗读"
     const val API_OFF = "供其他 App 调用（未开启）"
@@ -122,11 +127,11 @@ object SettingsText {
 
     /** The pages HOME links to, with their titles: the structure the 1.7.8 tests check. */
     val HOME_GROUPS: List<Pair<String, List<String>>> = listOf(
-        "模型与推理" to listOf("模型与后端", "生成", "上下文与记忆", "性能与资源"),
+        "模型与推理" to listOf("模型与后端", "生成", "记忆与上下文", "性能与资源"),
         "语音与服务" to listOf("语音", "API 服务"),
         "界面与外观" to listOf("外观"),
         "数据" to listOf("存储空间", "删除全部对话"),
-        "关于与调试" to listOf("资源诊断", "关于 IRIDIS"),
+        "关于与调试" to listOf("关于 IRIDIS"), // 2.1.3: 资源诊断 moved to 关于 IRIDIS › 开发者选项
     )
 }
 
@@ -171,18 +176,12 @@ fun SettingsHome(vm: SettingsViewModel, onBack: () -> Unit, onOpen: (SettingsPag
 
     SubpageScaffold("设置", onBack) {
         ScrollBody {
-            // 1.14.0 运行状态 rack.
-            if (s.showStatusRack) {
-                SectionTitle("运行状态")
-                RuntimeRack(vm, onOpen)
-            }
+            // 2.1.3: the 运行状态 rack moved to 关于 IRIDIS › 开发者选项 (DeveloperPage).
             SectionTitle("模型与推理")
             SettingsGroup {
                 NavItem("模型与后端", SettingsText.MODEL_BACKEND, com.iris.localai.ui.icons.IrisIcons.Chip) { onOpen(SettingsPage.MODEL_BACKEND) }
                 Divider()
                 NavItem("生成", SettingsText.GENERATION, com.iris.localai.ui.icons.IrisIcons.Spark) { onOpen(SettingsPage.GENERATION) }
-                Divider()
-                NavItem("上下文与记忆", SettingsText.CONTEXT, com.iris.localai.ui.icons.IrisIcons.Layers) { onOpen(SettingsPage.CONTEXT) }
                 Divider()
                 NavItem(
                     "性能与资源", "当前：${com.iris.localai.engine.ResourceTier.of(s.resourceTier).label}",
@@ -192,8 +191,8 @@ fun SettingsHome(vm: SettingsViewModel, onBack: () -> Unit, onOpen: (SettingsPag
                 // 1.9.0: 智能体 (tools, permissions, workspace). Not part of the 1.7.8 HOME_GROUPS structure test.
                 NavItem("智能体", com.iris.localai.ui.agent.AgentText.NAV, com.iris.localai.ui.icons.IrisIcons.Agent) { onOpen(SettingsPage.AGENT) }
                 Divider()
-                // 1.10.0: 记忆 (long-term memory, compaction). Not part of HOME_GROUPS either.
-                NavItem("记忆", com.iris.localai.ui.agent.MemoryText.NAV, com.iris.localai.ui.icons.IrisIcons.Memory) { onOpen(SettingsPage.MEMORY) }
+                // 2.1.3: 「上下文与记忆」 + 「记忆」 → one entry 「记忆与上下文」 (one page, context sections first).
+                NavItem("记忆与上下文", SettingsText.MEMORY_CONTEXT, com.iris.localai.ui.icons.IrisIcons.Memory) { onOpen(SettingsPage.MEMORY) }
             }
 
             SectionTitle("语音与服务")
@@ -222,9 +221,7 @@ fun SettingsHome(vm: SettingsViewModel, onBack: () -> Unit, onOpen: (SettingsPag
 
             SectionTitle("关于与调试")
             SettingsGroup {
-                // 2.0.x: the two diagnostic switches and the crash-log export live in 资源诊断 › 故障排查.
-                NavItem("资源诊断", SettingsText.DIAGNOSTICS, com.iris.localai.ui.icons.IrisIcons.Pulse) { onOpen(SettingsPage.DIAGNOSTICS) }
-                Divider()
+                // 2.1.3: 资源诊断 (with 故障排查) moved to 关于 IRIDIS › 开发者选项.
                 NavItem("关于 IRIDIS", "版本 ${BuildConfig.VERSION_NAME}", com.iris.localai.ui.icons.IrisIcons.Info) { onOpen(SettingsPage.ABOUT) }
             }
             VersionFooter(SettingsText.versionLine(BuildConfig.VERSION_NAME), SettingsText.TAGLINE)
@@ -267,15 +264,19 @@ fun ModelBackendPage(vm: SettingsViewModel, onBack: () -> Unit, onModels: () -> 
             SettingsGroup {
                 // 2.2.0: QAIRT bundles only run on the NPU — nothing to choose.
                 val formats = com.iris.localai.engine.EngineFactory.supportedFormats.filter { it != com.iris.localai.data.ModelFormat.QAIRT }
+                // 2.1.3: GGUF on the NPU runs on GenieX; the NPU choice is offered once its runtime is installed.
+                val gxReady = vm.geniex?.state?.collectAsState()?.value is com.iris.localai.engine.NpuState.Installed
                 formats.forEachIndexed { i, f ->
                     if (i > 0) Divider()
                     val cur = s.defaultBackends[f.name]
+                    // 2.1.3: GGUF can pick NPU (= GenieX) in the full build; the backend decides the engine.
+                    val withNpu = f == com.iris.localai.data.ModelFormat.GGUF && vm.geniex != null && (gxReady || cur == "NPU")
                     SegmentedRow(
-                        f.label, listOf("自动", "CPU", "GPU"),
-                        when (cur) { "CPU" -> 1; "GPU" -> 2; else -> 0 },
-                        { idx -> vm.setDefaultBackend(f, when (idx) { 1 -> "CPU"; 2 -> "GPU"; else -> null }) },
+                        f.label, if (withNpu) listOf("自动", "CPU", "GPU", "NPU") else listOf("自动", "CPU", "GPU"),
+                        when (cur) { "CPU" -> 1; "GPU" -> 2; "NPU" -> if (withNpu) 3 else 0; else -> 0 },
+                        { idx -> vm.setDefaultBackend(f, when (idx) { 1 -> "CPU"; 2 -> "GPU"; 3 -> "NPU"; else -> null }) },
                         subtitle = when (f) {
-                            com.iris.localai.data.ModelFormat.GGUF -> "自动 = CPU。GPU 走 Adreno OpenCL，Q4_0 / Q8_0 最快，首次加载要编译内核"
+                            com.iris.localai.data.ModelFormat.GGUF -> if (withNpu) "自动 = CPU。GPU 首次加载要编译；NPU 用 GenieX" else if (vm.geniex != null) "自动 = CPU。GPU 首次加载要编译；NPU ${com.iris.localai.engine.geniex.GgufEngineRule.NEED_GENIEX}" else "自动 = CPU。GPU 走 Adreno OpenCL，Q4_0 / Q8_0 最快，首次加载要编译内核"
                             com.iris.localai.data.ModelFormat.LITERT -> "自动 = GPU（Qwen3.5、Agents-A1 用 CPU）。GPU ${com.iris.localai.engine.BackendCapabilities.LITERT_GPU_WARNING}，之后会用缓存。文件名带 _sm8750 的 NPU 编译模型始终用 NPU"
                             com.iris.localai.data.ModelFormat.MNN -> "自动 = CPU。GPU 走 OpenCL"
                             com.iris.localai.data.ModelFormat.QAIRT -> "只能用 NPU"
@@ -290,13 +291,13 @@ fun ModelBackendPage(vm: SettingsViewModel, onBack: () -> Unit, onModels: () -> 
                 SettingsGroup { NpuRuntimeRow(npu, onInstall = vm::installNpu, onCancel = vm::cancelNpu, onDelete = vm::deleteNpu) }
             }
 
-            vm.geniex?.let { gx -> GenieXSection(vm, gx, s.ggufEngine) }
+            vm.geniex?.let { gx -> GenieXSection(vm, gx) }
 
-            SectionTitle("加载选项（修改后需重新加载模型）")
+            // 2.1.3: every load option sits behind 「高级」 (defaults unchanged).
+            SectionTitle("加载选项")
             SettingsGroup {
-                SwitchRow("Flash Attention", s.flashAttention, subtitle = "降低长上下文的内存与功耗（GGUF）") { on -> vm.update { it.copy(flashAttention = on) } }
-                Divider()
                 AdvancedFold("load", SettingsText.ADVANCED) {
+                    SwitchRow("Flash Attention", s.flashAttention, subtitle = "降低长上下文的内存与功耗（GGUF）") { on -> vm.update { it.copy(flashAttention = on) } }
                     Divider()
                     SegmentedRow(
                         "KV 缓存量化", listOf("F16", "Q8_0", "Q4_0"), s.kvCacheType.coerceIn(0, 2),
@@ -315,6 +316,7 @@ fun ModelBackendPage(vm: SettingsViewModel, onBack: () -> Unit, onModels: () -> 
                     SwitchRow("加载后预热", s.warmup, subtitle = "加载完先跑 1 个 token，首条回复更快") { on -> vm.update { it.copy(warmup = on) } }
                 }
             }
+            GroupFootnote("修改后需重新加载模型。")
         }
     }
 }
@@ -395,15 +397,20 @@ fun GenerationPage(vm: SettingsViewModel, onBack: () -> Unit) {
     }
 }
 
-/** 设置 › 上下文与记忆. */
+/**
+ * 设置 › 记忆与上下文. 2.1.3: the old 「上下文与记忆」 (context window) and 「记忆」 pages are one
+ * page: the context sections on top, then the memory settings ([com.iris.localai.ui.agent.MemorySettingsPage]).
+ * Both SettingsPage.CONTEXT and SettingsPage.MEMORY open it. 「恢复默认」 still only resets the context part.
+ */
 @Composable
 fun ContextPage(vm: SettingsViewModel, onBack: () -> Unit) {
     val s by vm.settings.collectAsStateWithLifecycle()
-    SubpageScaffold(
-        "上下文与记忆", onBack,
+    com.iris.localai.ui.agent.MemorySettingsPage(
+        onBack = onBack,
+        title = "记忆与上下文",
         actions = { IrisButton("恢复默认", vm::resetContext, style = IrisButtonStyle.Text, compact = true) },
     ) {
-        ScrollBody {
+        run {
             SectionTitle("上下文窗口")
             SettingsGroup {
                 SliderRow("上下文长度", s.contextLength.toFloat(), 1024f..32768f, "${s.contextLength} tokens", subtitle = "模型一次能看到的对话长度；越大越占内存，修改后重新加载模型生效") { v ->
@@ -447,8 +454,7 @@ fun PerformancePage(vm: SettingsViewModel, onBack: () -> Unit, onOpen: (Settings
                     status = com.iris.localai.engine.LiveResourcePolicy.statusText(tierApply),
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 10.dp),
                 )
-                Divider()
-                NavItem("资源档配置", SettingsText.TIER_PROFILES, com.iris.localai.ui.icons.IrisIcons.Bolt) { onOpen(SettingsPage.TIER_PROFILES) }
+                // 2.1.3: 资源档配置 moved to 关于 IRIDIS › 开发者选项.
             }
             GroupFootnote("越低越省电，越高越快；对话、语音和 API 都按这个档位。档位只调整 CPU 资源，不会改变后端。" + com.iris.localai.engine.LiveResourcePolicy.GPU_SCOPE_NOTE + "。")
 
@@ -528,7 +534,7 @@ fun PerformancePage(vm: SettingsViewModel, onBack: () -> Unit, onOpen: (Settings
 }
 
 @Composable
-fun AboutPage(onBack: () -> Unit) {
+fun AboutPage(onBack: () -> Unit, onDeveloper: () -> Unit = {}) {
     val c = Iris.colors
     // 1.14.7: 许可证全文 is routed inside the About page (no new top-level route).
     var showLicenses by rememberSaveable { mutableStateOf(false) }
@@ -575,6 +581,11 @@ fun AboutPage(onBack: () -> Unit) {
                     if (i > 0) Divider()
                     SettingsRow(name, subtitle = desc)
                 }
+            }
+            // 2.1.3: 开发者选项 at the bottom of 关于 IRIDIS.
+            Spacer(Modifier.height(IrisDimens.space24))
+            SettingsGroup {
+                NavItem("开发者选项", SettingsText.DEVELOPER, com.iris.localai.ui.icons.IrisIcons.Pulse, onDeveloper)
             }
         }
     }
@@ -829,7 +840,7 @@ private fun RuntimeRack(vm: SettingsViewModel, onOpen: (SettingsPage) -> Unit) {
 }
 
 
-/** 1.14.1 外观: theme, visual effects, top-bar buttons, the 运行状态 rack. */
+/** 1.14.1 外观: theme, visual effects, feedback. */
 @Composable
 fun AppearancePage(vm: SettingsViewModel, onBack: () -> Unit) {
     val s by vm.settings.collectAsStateWithLifecycle()
@@ -856,19 +867,45 @@ fun AppearancePage(vm: SettingsViewModel, onBack: () -> Unit) {
                     } + "。系统省电或发热时自动降级",
                 )
             }
-            SectionTitle("界面")
-            SettingsGroup {
-                SwitchRow("顶栏按钮底色", s.topBarCapsules, subtitle = "聊天页顶部的菜单、模型名和新对话按钮显示灰色胶囊底") { on -> vm.update { it.copy(topBarCapsules = on) } }
-                Divider()
-                SwitchRow("运行状态机架", s.showStatusRack, subtitle = "在设置首页顶部显示各组件的运行状态") { on -> vm.update { it.copy(showStatusRack = on) } }
-                Divider()
-                SwitchRow("性能浮窗", s.perfOverlay, subtitle = "生成时在聊天页右上角显示速度、CPU 与内存") { on -> vm.update { it.copy(perfOverlay = on) } }
-            }
+            // 2.1.3: 顶栏按钮底色 / 运行状态机架 / 性能浮窗 moved to 关于 IRIDIS › 开发者选项 (DeveloperPage).
             SectionTitle("反馈")
             SettingsGroup {
                 SwitchRow("触感反馈", s.haptics, subtitle = "发送、步骤完成、长按和拖动时轻微振动", icon = com.iris.localai.ui.icons.IrisIcons.Haptic) { on -> vm.update { it.copy(haptics = on) } }
                 Divider()
                 SwitchRow("提示音", s.sound, subtitle = "发送和回复完成时的轻柔提示音；静音、勿扰或语音对话时不响", icon = com.iris.localai.ui.icons.IrisIcons.Sound) { on -> vm.update { it.copy(sound = on) } }
+            }
+        }
+    }
+}
+
+
+/**
+ * 2.1.3 关于 IRIDIS › 开发者选项: the rarely used tuning / diagnostics pages and display switches,
+ * moved off the main settings list and 外观. Default values unchanged.
+ */
+@Composable
+fun DeveloperPage(vm: SettingsViewModel, onBack: () -> Unit, onOpen: (SettingsPage) -> Unit) {
+    val s by vm.settings.collectAsStateWithLifecycle()
+    SubpageScaffold("开发者选项", onBack) {
+        ScrollBody {
+            SectionTitle("资源")
+            SettingsGroup {
+                NavItem("资源档配置", SettingsText.TIER_PROFILES, com.iris.localai.ui.icons.IrisIcons.Bolt) { onOpen(SettingsPage.TIER_PROFILES) }
+                Divider()
+                NavItem("资源诊断", SettingsText.DIAGNOSTICS, com.iris.localai.ui.icons.IrisIcons.Pulse) { onOpen(SettingsPage.DIAGNOSTICS) }
+            }
+            SectionTitle("显示")
+            SettingsGroup {
+                SwitchRow("运行状态机架", s.showStatusRack, subtitle = "在本页显示各组件的运行状态") { on -> vm.update { it.copy(showStatusRack = on) } }
+                Divider()
+                SwitchRow("性能浮窗", s.perfOverlay, subtitle = "生成时在聊天页右上角显示速度、CPU 与内存") { on -> vm.update { it.copy(perfOverlay = on) } }
+                Divider()
+                SwitchRow("顶栏按钮底色", s.topBarCapsules, subtitle = "聊天页顶部的按钮显示灰色底") { on -> vm.update { it.copy(topBarCapsules = on) } }
+            }
+            // 1.14.0 运行状态 rack (2.1.3: moved here from the settings home).
+            if (s.showStatusRack) {
+                SectionTitle("运行状态")
+                RuntimeRack(vm, onOpen)
             }
         }
     }

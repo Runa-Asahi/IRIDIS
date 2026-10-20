@@ -69,15 +69,16 @@ class V220GenieXTest {
         val o = BackendCapabilities.options(ModelFormat.GGUF, "Qwen3-4B-Q4_0.gguf", ready, GenieX.ENGINE_GENIEX)
         assertTrue(o.all { it.available })
         assertEquals("最快，Q4_0 模型效果最好", o.first { it.backend == Backend.NPU }.detail) // 2.1.2: short, the sheet already names the engine
-        assertEquals(Backend.NPU, BackendCapabilities.autoBackend(ModelFormat.GGUF, "Qwen3-4B-Q4_0.gguf", o))
+        // 2.1.3: GGUF 自动 stays on the CPU; NPU (= GenieX) is an explicit pick (old 「GenieX」 overrides migrate to backend NPU).
+        assertEquals(Backend.CPU, BackendCapabilities.autoBackend(ModelFormat.GGUF, "Qwen3-4B-Q4_0.gguf", o))
         // no OpenCL → GPU greyed out with the reason
         val noCl = BackendCapabilities.options(ModelFormat.GGUF, "a.gguf", ready.copy(hasOpenCl = false), GenieX.ENGINE_GENIEX)
         assertFalse(noCl.first { it.backend == Backend.GPU }.available)
     }
 
     @Test fun llamaGgufBehaviourUnchanged() {
-        val before = BackendCapabilities.options(ModelFormat.GGUF, "a.gguf", ready)
-        assertEquals(before, BackendCapabilities.options(ModelFormat.GGUF, "a.gguf", ready, GenieX.ENGINE_LLAMA))
+        // 2.1.3: with no engine given the backend decides (NPU = GenieX), so the explicit llama.cpp list is checked here.
+        val before = BackendCapabilities.options(ModelFormat.GGUF, "a.gguf", ready, GenieX.ENGINE_LLAMA)
         assertFalse(before.first { it.backend == Backend.NPU }.available)
         assertEquals(Backend.CPU, BackendCapabilities.autoBackend(ModelFormat.GGUF, "a.gguf", before))
         assertTrue(BackendCapabilities.features(ModelFormat.GGUF, "a.gguf").kvQuant)
