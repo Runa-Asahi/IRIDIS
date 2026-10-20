@@ -157,6 +157,10 @@ fun IrisTheme(
     glassQuality: GlassQuality,
     reduceMotion: Boolean = false,
     decorativeMotion: Boolean = true,
+    /** 2.1.4 配色 (默认 / 樱花粉 / 薄荷绿 / 丁香紫 / 奶油黄); the mode still picks light or dark. */
+    palette: IrisPalette = IrisPalette.DEFAULT,
+    /** 2.1.4: a custom chat background is set → cards and bubbles turn slightly see-through. */
+    backdrop: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val dark = when (mode) {
@@ -164,7 +168,7 @@ fun IrisTheme(
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
-    val c = if (dark) IrisDarkColors else IrisLightColors
+    val c = palette.colors(dark).let { if (backdrop) it.overBackdrop() else it }
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
@@ -197,6 +201,9 @@ fun IrisTheme(
             LocalIrisColors provides c,
             LocalGlassQuality provides glassQuality,
             LocalReduceMotion provides reduceMotion,
+            // 2.1.4: text selection follows the theme accent.
+            androidx.compose.foundation.text.selection.LocalTextSelectionColors provides
+                androidx.compose.foundation.text.selection.TextSelectionColors(c.accent, c.accent.copy(alpha = 0.3f)),
             LocalDecorativeMotion provides (decorativeMotion && !reduceMotion),
             // One animated press highlight for every clickable in the app (replaces the M3 ripple).
             LocalIndication provides remember(c.isDark, reduceMotion) {

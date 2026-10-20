@@ -127,6 +127,10 @@ fun AppSettings.sanitized(): AppSettings {
         contextKeepTurns = contextKeepTurns.coerceIn(1, 64),
         summaryTriggerPercent = summaryTriggerPercent.coerceIn(40, 95),
         visualEffects = visualEffects.coerceIn(-1, 2),
+        themePalette = themePalette.takeIf { com.iris.localai.ui.theme.IrisPalette.isValid(it) } ?: d.themePalette,
+        backgroundImage = backgroundImage.takeIf { com.iris.localai.ui.theme.BackgroundImage.isValidName(it) } ?: "",
+        backgroundBlur = backgroundBlur.coerceIn(0, com.iris.localai.ui.theme.BackgroundImage.MAX_BLUR_DP),
+        backgroundScrim = backgroundScrim.coerceIn(0, com.iris.localai.ui.theme.BackgroundImage.MAX_SCRIM),
     )
 }
 

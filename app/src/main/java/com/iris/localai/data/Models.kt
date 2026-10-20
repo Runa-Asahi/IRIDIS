@@ -305,6 +305,16 @@ data class AppSettings(
     // ---- 2.2.0 ----
     /** 默认 GGUF 引擎: "llama" (built-in llama.cpp) or "geniex" (Qualcomm GenieX, full flavour); per-model override in ModelOverrides.engine. */
     val ggufEngine: String = "llama",
+
+    // ---- 2.1.4 外观 ----
+    /** 配色: [com.iris.localai.ui.theme.IrisPalette.id] — "default" / "sakura" / "mint" / "lilac" / "cream". */
+    val themePalette: String = "default",
+    /** 自定义背景: file name in filesDir/backgrounds ([com.iris.localai.ui.theme.BackgroundImage]); "" = none. */
+    val backgroundImage: String = "",
+    /** 模糊程度 of the custom background, dp (0–25). */
+    val backgroundBlur: Int = 0,
+    /** 遮罩深浅: % of the theme background laid over the picture (0–90). */
+    val backgroundScrim: Int = 40,
 )
 
 /** How a conversation's history is fitted into the model's context window. */

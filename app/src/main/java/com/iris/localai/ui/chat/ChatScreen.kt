@@ -337,6 +337,8 @@ fun ChatScreen(
 
             // ---- Message list: top-down, newest at the bottom ----
             Box(Modifier.fillMaxSize().glassSource(backdrop, Iris.colors.chatBackground)) {
+                // 2.1.4 外观 › 自定义背景 (inside the glass source so the composer glass blurs it too).
+                com.iris.localai.ui.theme.ChatBackdropImage(settings.backgroundImage, settings.backgroundBlur, settings.backgroundScrim)
                 if (messages.isEmpty()) {
                     ChatEmptyState(
                         modelName = ui.readyModel?.displayName,

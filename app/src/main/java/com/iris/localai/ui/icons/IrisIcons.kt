@@ -119,4 +119,13 @@ object IrisIcons {
 
     /** 设置 (2.1, sliders) */
     val Settings: ImageVector by lazy { icon("Settings", "M4 7h9 M17 7h3 M15 4.5v5 M4 17h3 M11 17h9 M9 14.5v5") }
+
+    /** 2.1.4 自定义背景 (picture) */
+    val Image: ImageVector by lazy { icon("Image", "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M3.5 16.5l5-5 4 4 2.5-2.5 5.5 5.5 M15.5 8.5h0.01") }
+
+    /** 2.1.4 selected swatch */
+    val Check: ImageVector by lazy { icon("Check", "M5 12.5l4.5 4.5L19 7.5") }
+
+    /** 2.1.4 移除背景 */
+    val Trash: ImageVector by lazy { icon("Trash", "M4 7h16 M9.5 7V4.5h5V7 M6.5 7l1 12.5h9l1-12.5 M10 11v5 M14 11v5") }
 }

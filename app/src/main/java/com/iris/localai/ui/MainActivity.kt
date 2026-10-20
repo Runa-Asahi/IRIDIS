@@ -103,6 +103,8 @@ class MainActivity : ComponentActivity() {
             IrisTheme(
                 mode = settings.themeMode, glassQuality = quality, reduceMotion = reduceMotion,
                 decorativeMotion = resumed && !streaming && !powerSave && settings.visualEffects != 0,
+                palette = com.iris.localai.ui.theme.IrisPalette.of(settings.themePalette),
+                backdrop = settings.backgroundImage.isNotEmpty(),
             ) {
                 // 1.14.7: first-launch welcome (carries the disclaimer) gates the app until accepted;
                 // fresh installs and upgrades see it once (welcomeAccepted defaults to false).

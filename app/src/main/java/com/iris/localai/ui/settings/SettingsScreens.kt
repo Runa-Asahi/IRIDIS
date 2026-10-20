@@ -844,6 +844,19 @@ private fun RuntimeRack(vm: SettingsViewModel, onOpen: (SettingsPage) -> Unit) {
 @Composable
 fun AppearancePage(vm: SettingsViewModel, onBack: () -> Unit) {
     val s by vm.settings.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var bgFailed by remember { mutableStateOf(false) }
+    // 2.1.4 自定义背景: system photo picker (no storage permission); the picture is copied in, the URI dropped.
+    val pickBackground = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri != null) scope.launch {
+            val name = com.iris.localai.ui.theme.BackgroundImage.import(context, uri)
+            bgFailed = name == null
+            if (name != null) vm.update { it.copy(backgroundImage = name) }
+        }
+    }
     SubpageScaffold("外观", onBack) {
         ScrollBody {
             SectionTitle("主题")
@@ -856,6 +869,8 @@ fun AppearancePage(vm: SettingsViewModel, onBack: () -> Unit) {
                     subtitle = SettingsText.THEME,
                 )
                 Divider()
+                PaletteSwatches(s.themePalette) { p -> vm.update { it.copy(themePalette = p.id) } }
+                Divider()
                 SegmentedRow(
                     "视觉效果", com.iris.localai.ui.glass.GlassPolicy.LEVEL_LABELS, s.visualEffects.coerceIn(0, 2),
                     { i -> vm.update { it.copy(visualEffects = i, glassEffects = i > 0) } },
@@ -866,6 +881,46 @@ fun AppearancePage(vm: SettingsViewModel, onBack: () -> Unit) {
                         else -> "降采样毛玻璃；日常推荐"
                     } + "。系统省电或发热时自动降级",
                 )
+            }
+            SectionTitle("背景")
+            SettingsGroup {
+                val hasBg = s.backgroundImage.isNotEmpty()
+                SettingsRow(
+                    "自定义背景",
+                    subtitle = when { bgFailed -> AppearanceText.BACKGROUND_FAILED; hasBg -> AppearanceText.BACKGROUND_SET; else -> AppearanceText.BACKGROUND_NONE },
+                    icon = com.iris.localai.ui.icons.IrisIcons.Image,
+                    onClick = {
+                        pickBackground.launch(
+                            androidx.activity.result.PickVisualMediaRequest(
+                                androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                            ),
+                        )
+                    },
+                    trailing = { Chevron() },
+                )
+                if (hasBg) {
+                    Divider()
+                    SliderRow(
+                        "模糊程度", s.backgroundBlur.toFloat(), 0f..com.iris.localai.ui.theme.BackgroundImage.MAX_BLUR_DP.toFloat(),
+                        display = "${s.backgroundBlur} dp", subtitle = AppearanceText.BLUR,
+                        steps = com.iris.localai.ui.theme.BackgroundImage.MAX_BLUR_DP - 1,
+                    ) { v -> vm.update { it.copy(backgroundBlur = kotlin.math.round(v).toInt()) } }
+                    Divider()
+                    SliderRow(
+                        "遮罩深浅", s.backgroundScrim.toFloat(), 0f..com.iris.localai.ui.theme.BackgroundImage.MAX_SCRIM.toFloat(),
+                        display = "${s.backgroundScrim}%", subtitle = AppearanceText.SCRIM,
+                    ) { v -> vm.update { it.copy(backgroundScrim = kotlin.math.round(v).toInt()) } }
+                    Divider()
+                    SettingsRow(
+                        "移除背景", subtitle = AppearanceText.REMOVE, icon = com.iris.localai.ui.icons.IrisIcons.Trash,
+                        titleColor = com.iris.localai.ui.theme.Iris.colors.danger,
+                        onClick = {
+                            bgFailed = false
+                            vm.update { it.copy(backgroundImage = "") }
+                            scope.launch { com.iris.localai.ui.theme.BackgroundImage.clear(context) }
+                        },
+                    )
+                }
             }
             // 2.1.3: 顶栏按钮底色 / 运行状态机架 / 性能浮窗 moved to 关于 IRIDIS › 开发者选项 (DeveloperPage).
             SectionTitle("反馈")
