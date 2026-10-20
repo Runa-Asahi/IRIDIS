@@ -903,6 +903,11 @@ class EngineManager(
         generation.withLock { engine?.resetContext() }
     }
 
+    /** 2.3: 新对话 — keeps the KV cache where the engine reuses a common prefix by itself (system prompt). */
+    suspend fun resetForNewChat() {
+        generation.withLock { engine?.takeUnless { it.reusesCommonPrefix }?.resetContext() }
+    }
+
     /** Restart the idle countdown (also call on user activity such as typing). */
     fun touch() = scheduleIdleUnload()
 

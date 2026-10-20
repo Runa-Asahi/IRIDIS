@@ -83,6 +83,6 @@ class PlanStepCardTest {
         val r = PlanTool.run(buildJsonObject { put("action", "set"); put("steps", "a\nb") }, env)
         assertEquals(2, r.plan!!.steps.size)
         assertTrue(r.output.contains("Continue with step 1. Mark it done with plan(action: done, step: 1)."))
-        assertTrue(AgentPrompt.build(AgentTools.all, plan = store.get("c1")).isNotEmpty())
+        assertTrue(AgentPrompt.planNote(store.get("c1"))!!.contains("Continue with step 1"))
     }
 }

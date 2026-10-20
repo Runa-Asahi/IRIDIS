@@ -37,7 +37,7 @@ object WebSearchTool : AgentTool {
     override val name = "web_search"
     override val label = "联网搜索"
     override val description = "搜索网页或新闻，返回前几条结果的标题、摘要和链接"
-    override val promptLine = "web_search(query, news?: bool): search the internet"
+    override val promptLine = "web_search(query, news?: bool)"
     override val risk = ToolRisk.NETWORK
     override val defaultPermission: Permission = Permission.ALLOW
 

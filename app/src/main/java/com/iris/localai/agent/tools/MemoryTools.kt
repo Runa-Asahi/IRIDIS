@@ -29,7 +29,7 @@ object RecallTool : AgentTool {
     override val name = "recall"
     override val label = "回忆"
     override val description = "检索本对话（或全部对话）里较早的消息与工具记录"
-    override val promptLine = "recall(query, scope?: chat|all): search earlier messages"
+    override val promptLine = "recall(query, scope?: chat|all): search past messages"
     override val risk = ToolRisk.READ
     private const val DEFAULT_LIMIT = 5
 
@@ -59,7 +59,7 @@ object MemoryTool : AgentTool {
     override val name = "memory"
     override val label = "长期记忆"
     override val description = "增删改长期记忆（USER.md 关于你 / MEMORY.md 记住的事，各约 1500 字上限）"
-    override val promptLine = "memory(action: add|replace|remove, target: user|memory, content?, old?): durable facts (user = about the user)"
+    override val promptLine = "memory(action: add|replace|remove, target: user|memory, content?, old?): lasting facts; user = about the user"
     override val risk = ToolRisk.MEMORY
 
     override fun run(args: JsonObject, env: ToolEnv): ToolResult {

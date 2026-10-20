@@ -63,9 +63,9 @@ object RunCommandTool : AgentTool {
     /** 1.11.0/1.12.0: the backend chosen now (set by AgentContainer.env). */
     @Volatile var kind: CommandBackend = CommandBackend.BUILTIN
     override val promptLine: String get() = when (kind) {
-        CommandBackend.TERMUX -> "run_command(command): bash command in the workspace (full Linux: pkg, python, git, curl)"
-        CommandBackend.PROOT -> "run_command(command): Alpine Linux shell, starts in /workspace; cd and export carry over (apk add python3 git curl)"
-        CommandBackend.BUILTIN -> "run_command(command): shell command in the workspace (toybox: ls cat grep sed find wc cp mv rm)"
+        CommandBackend.TERMUX -> "run_command(command): bash in the workspace (pkg, python, git, curl)"
+        CommandBackend.PROOT -> "run_command(command): Alpine Linux shell in /workspace; cd/export persist (apk add python3 git)"
+        CommandBackend.BUILTIN -> "run_command(command): toybox shell in the workspace (ls cat grep sed find)"
     }
     override val risk = ToolRisk.DELETE
     override fun permissionFor(args: JsonObject, base: Permission, env: ToolEnv): Permission = commandPermission(args, base, env)

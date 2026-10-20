@@ -293,7 +293,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         if (runningInBackground()) { viewing.value = Conversation(); noteBackground(); return }
         viewing.value = null
         conversation.value = Conversation()
-        viewModelScope.launch { c.engine.resetContext() }
+        // 2.3: llama.cpp keeps the cached system prompt for the new chat (common-prefix reuse).
+        viewModelScope.launch { c.engine.resetForNewChat() }
     }
 
     fun open(id: String) {
@@ -446,17 +447,24 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
     private fun contextTokensFor(ready: EngineState.Ready?): Int =
         ready?.details?.contextLength?.takeIf { it > 0 } ?: c.engine.effective(ready?.model).contextLength
 
-    /** 2.1.0 引用知识库: user message id → snippet block added to it in the prompt (对话 mode). */
-    @Volatile private var kbBlock: Pair<String, String>? = null
+    /**
+     * 2.1.0 引用知识库: user message id → snippet block added to it in the prompt (对话 mode).
+     * 2.3: kept for every message answered with snippets (was: only the newest), so the next turn
+     * sends the history the engine already holds and its KV cache is reused instead of the whole
+     * conversation being prefilled again. Bounded ([KbChat.MAX_KEPT]); not persisted.
+     */
+    private val kbBlocks = LinkedHashMap<String, String>()
 
     /** 2.1.0: finds knowledge snippets for the newest user message (typed chat only) and marks the reply. */
     private suspend fun prepareKnowledge(requester: Requester, replyId: String) {
-        kbBlock = null
         if (requester != Requester.CHAT || !c.settings.current.knowledgeInChat) return
         val user = conversation.value.messages.lastOrNull { it.role == Role.USER && it.content.isNotBlank() } ?: return
         val hits = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.iris.localai.knowledge.KbChat.hits(c.agent.knowledge, user.content) }
+        synchronized(kbBlocks) {
+            if (hits.isEmpty()) kbBlocks.remove(user.id)
+            else com.iris.localai.knowledge.KbChat.remember(kbBlocks, user.id, com.iris.localai.knowledge.KbPrompt.inject(hits))
+        }
         if (hits.isEmpty()) return
-        kbBlock = user.id to com.iris.localai.knowledge.KbPrompt.inject(hits)
         conversation.update { conv -> conv.copy(messages = conv.messages.map { if (it.id == replyId) it.copy(kbRefs = hits.size) else it }) }
     }
 
@@ -487,7 +495,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         val baseSystem = if (agentMode) {
             val ag = c.agent.settings.current
             com.iris.localai.agent.AgentTools.all.filter { ag.isEnabled(it) }.let { t ->
-                agentSystem(t, eff.systemPrompt, ready?.model?.fileName, conv.id)
+                agentSystem(t, eff.systemPrompt, ready?.model?.fileName)
             }
         } else eff.systemPrompt.trim()
         val memory = com.iris.localai.context.ContextAssembly.memoryBlock(conv, memoryInjectFor(agentMode), ctx, c.agent.memorySettings.current.epoch)
@@ -760,13 +768,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         val active = com.iris.localai.context.ContextAssembly.active(conv.messages, conv.contextStartAfterId, withTools = agent, vision = ready?.details?.supportsVision == true)
         val compaction = com.iris.localai.context.Compactor.applicable(conv.compaction, active)
         val memory = com.iris.localai.context.ContextAssembly.memoryBlock(conv, memoryInjectFor(agent && !voice), contextTokensFor(ready), c.agent.memorySettings.current.epoch)
-        val system = com.iris.localai.context.ContextAssembly.system(baseSystem, memory, compaction)
+        val system = com.iris.localai.context.ContextAssembly.system(baseSystem, memory)
+        // 2.3: every message keeps the knowledge block it was answered with, so the history the
+        // engine sees next turn is the one it already holds (KV-cache reuse).
         val msgs = com.iris.localai.context.ContextAssembly.forPlanner(active, compaction, withTools = agent)
-            .let { m -> kbBlock?.takeIf { !agent }?.let { (id, block) -> com.iris.localai.knowledge.KbChat.attach(m, id, block) } ?: m }
+            .let { m -> if (agent || !s.knowledgeInChat) m else synchronized(kbBlocks) { com.iris.localai.knowledge.KbChat.attachAll(m, kbBlocks) } }
         return com.iris.localai.util.ContextPlanner.plan(
             com.iris.localai.util.ContextRequest(
                 system = system,
                 messages = msgs,
+                // 2.3: the compaction summary leads the history (system prompt stays cacheable).
+                lead = com.iris.localai.context.ContextAssembly.lead(compaction),
                 strategy = com.iris.localai.data.ContextStrategy.of(conv.contextStrategy ?: s.contextStrategy),
                 contextTokens = ready?.details?.contextLength?.takeIf { it > 0 } ?: eff.contextLength,
                 // 1.7.8: room for the reasoning budget too (the planner caps the reserve at half the window).
@@ -1148,12 +1160,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         if (tools.any { it.name == com.iris.localai.agent.SkillTool.name }) runCatching { c.agent.skills.all() }.getOrDefault(emptyList()) else emptyList()
 
     /** 1.14.0: the agent system prompt (按需载入, the conversation's plan, 计划模式). */
-    private fun agentSystem(tools: List<com.iris.localai.agent.AgentTool>, userSystem: String, modelFile: String?, convId: String): String {
+    private fun agentSystem(tools: List<com.iris.localai.agent.AgentTool>, userSystem: String, modelFile: String?, memory: String = ""): String {
         val ag = c.agent.settings.current
+        // 2.3: no plan here any more (it rides on the newest user turn, see AgentPrompt.withPlanNote).
         return com.iris.localai.agent.AgentPrompt.build(
             tools, userSystem, com.iris.localai.agent.AgentPrompt.styleFor(modelFile), skillsFor(tools),
-            lazy = ag.lazyTools, plan = c.agent.plans.get(convId), planFirst = ag.planFirst,
+            lazy = ag.lazyTools, planFirst = ag.planFirst, memory = memory,
         )
+    }
+
+    /** 2.3: the 智能体 system prompt for [conv]: the user's instructions and the frozen memory as their own sections. */
+    private fun agentSystemFor(conv: Conversation, ready: EngineState.Ready?, tools: List<com.iris.localai.agent.AgentTool>): String {
+        val memory = com.iris.localai.context.ContextAssembly.memoryBlock(conv, memoryInjectFor(true), contextTokensFor(ready), c.agent.memorySettings.current.epoch)
+        return agentSystem(tools, c.engine.effective(ready?.model).systemPrompt, ready?.model?.fileName, memory)
     }
 
     /** 1.14.0: the open conversation's plan (计划卡片). */
@@ -1463,8 +1482,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
             val p = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { planFor(conversation.value, ready, voice = false, agent = true, maxNewOverride = maxNew) }
             plan = p
             val history = p.messages.filter { it.role != PromptMessage.SYSTEM }
-            val userSystem = p.messages.firstOrNull { it.role == PromptMessage.SYSTEM }?.content.orEmpty()
-            val base = listOf(PromptMessage(PromptMessage.SYSTEM, agentSystem(tools, userSystem, ready?.model?.fileName, convId))) + history
+            // 2.3: stable system prompt (persona + tools + instructions + frozen memory); the plan goes on the new user turn.
+            val base = listOf(PromptMessage(PromptMessage.SYSTEM, agentSystemFor(conversation.value, ready, tools))) +
+                com.iris.localai.agent.AgentPrompt.withPlanNote(history, c.agent.plans.get(convId))
             val budget = (ctxTokens - maxNew - 32).coerceAtLeast(ctxTokens / 3)
             // 1.10.6: continue from the previous 智能体 run's full prompt when nothing in between
             // changed, so the engine reuses its KV cache (fast first token) and the model still sees
@@ -1591,8 +1611,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         val maxNew = minOf(eff.maxNewTokens, AGENT_MAX_NEW)
         freezeMemory(agentMode = true)
         val p = planFor(conversation.value, ready, voice = false, agent = true, maxNewOverride = maxNew)
-        val userSystem = p.messages.firstOrNull { it.role == PromptMessage.SYSTEM }?.content.orEmpty()
-        return listOf(PromptMessage(PromptMessage.SYSTEM, agentSystem(tools, userSystem, ready.model.fileName, conv.id))) +
+        return listOf(PromptMessage(PromptMessage.SYSTEM, agentSystemFor(conversation.value, ready, tools))) +
             p.messages.filter { it.role != PromptMessage.SYSTEM }
     }
 

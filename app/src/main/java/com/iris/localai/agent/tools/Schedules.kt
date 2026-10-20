@@ -115,7 +115,7 @@ object ScheduleTool : AgentTool {
     override val name = "schedule"
     override val label = "定时任务"
     override val description = "提醒或定时让智能体做一件事（到点发通知，点开即执行）"
-    override val promptLine = "schedule(action: add|list|remove, time?: \"[yyyy-MM-dd ]HH:mm\", repeat?: none|daily|weekdays|weekly, prompt?, title?, id?, auto?: bool, charging_only?, max_minutes?)"
+    override val promptLine = "schedule(action: add|list|remove, time?, repeat?: none|daily|weekdays|weekly, prompt?, title?, id?, auto?, charging_only?, max_minutes?)"
     override val risk = ToolRisk.WRITE
     override val group = ToolGroup.TASKS
 

@@ -231,6 +231,9 @@ class LlamaEngine : InferenceEngine {
         if (req != null) cancelRequest(req) else nativeCancel()
     }
 
+    /** iris_engine.cpp generate(): longest common token prefix kept, the rest removed and re-decoded. */
+    override val reusesCommonPrefix: Boolean get() = true
+
     override suspend fun resetContext() = withContext(nativeThread) {
         val h = handle
         if (h != 0L) LlamaNative.nativeReset(h)

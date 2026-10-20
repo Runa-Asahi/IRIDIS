@@ -69,7 +69,7 @@ object PlanTool : AgentTool {
     override val name = "plan"
     override val label = "计划"
     override val description = "多步任务先列计划（界面显示为卡片，压缩后仍保留），逐步标记完成"
-    override val promptLine = "plan(action: set|done|skip|show|clear, steps?, step?, title?): multi-step plan"
+    override val promptLine = "plan(action: set|done|skip|show|clear, steps?, step?, title?)"
     override val risk = ToolRisk.SAFE
 
     override fun run(args: JsonObject, env: ToolEnv): ToolResult {
@@ -133,7 +133,7 @@ object ActivateTool : AgentTool {
     override val name = "activate"
     override val label = "载入工具"
     override val description = "按需载入一组工具的完整用法（提示里只列名称，省上下文）"
-    override val promptLine = "activate(group): load a tool group's usage before using it"
+    override val promptLine = "activate(group): load a tool group"
     override val risk = ToolRisk.SAFE
 
     /** Groups the prompt lists by name only when 按需载入 is on. */
@@ -154,6 +154,7 @@ object ActivateTool : AgentTool {
             if (group.hint.isNotEmpty()) append(" — ").append(group.hint)
             append('\n')
             ts.forEach { append("- ").append(it.promptLine).append('\n') }
+            if (ts.any { it.promptLine.contains("time?") }) append("time = ").append(AgentPrompt.TIME_FORMAT).append(", local\n")
             append("You can call these tools now.")
         }
         return ToolResult(true, out, "已载入 ${group.label} · ${ts.size} 个")

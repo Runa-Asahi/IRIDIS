@@ -121,6 +121,14 @@ interface InferenceEngine {
     /** Forget cached conversation state (KV cache / session). */
     suspend fun resetContext()
 
+    /**
+     * 2.3: true when the engine matches every request against what its KV cache holds on its own
+     * (llama.cpp: longest common token prefix, the rest re-decoded), so a new chat need not drop the
+     * cache: its first turn reuses the shared system prompt (智能体: ~500 tokens) instead of
+     * prefilling it again. Engines that only continue an exact history keep the reset.
+     */
+    val reusesCommonPrefix: Boolean get() = false
+
     suspend fun unload()
 }
 

@@ -31,13 +31,15 @@ class V1140Test {
         val d = PlanTool.run(buildJsonObject { put("action", "done"); put("step", 1) }, e)
         assertTrue(d.output, d.output.contains("1. [x] 搜索新闻") && d.output.contains("2. [~] 整理要点"))
         assertEquals(1, store.get("c1")!!.done)
-        // the plan rides in the system prompt (survives compaction)
-        val p = AgentPrompt.build(listOf(PlanTool), plan = store.get("c1"))
+        // 2.3: the plan rides on the newest user turn (re-added every run, so it survives compaction),
+        // no longer in the system prompt (a plan update used to force a full re-prefill)
+        val p = AgentPrompt.planNote(store.get("c1"))!!
         assertTrue(p.contains("# Current plan — 新闻") && p.contains("Continue with step 2"))
+        assertFalse(AgentPrompt.build(listOf(PlanTool)).contains("# Current plan"))
         PlanTool.run(buildJsonObject { put("action", "done") }, e)
         PlanTool.run(buildJsonObject { put("action", "done") }, e)
         assertTrue(store.get("c1")!!.finished)
-        assertFalse(AgentPrompt.build(listOf(PlanTool), plan = store.get("c1")).contains("# Current plan"))
+        assertNull(AgentPrompt.planNote(store.get("c1")))
     }
 
     @Test fun todoIsAnAliasOfPlan() {

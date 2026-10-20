@@ -302,14 +302,16 @@ class V1100Test {
         assertFalse(ContextAssembly.forPlanner(chat, null, false)[1].content.contains("list_dir"))
         // manual break
         assertEquals(listOf("3", "6"), ContextAssembly.active(c.messages, "2", false).map { it.id })
-        // with a compaction, only the rest goes to the planner and the summary joins the system prompt
+        // with a compaction, only the rest goes to the planner; 2.3: the summary leads the history
+        // (the system prompt no longer changes when the history is folded)
         val s = Compactor.maybeCompact(agent, null, 0, CompactPolicy(4096), true, manual = true)!!
         assertEquals(listOf("6"), ContextAssembly.forPlanner(agent, s, true).map { it.id })
-        val sys = ContextAssembly.system("自定义指令", "【长期记忆】x", s)
-        assertTrue(sys.startsWith("自定义指令\n\n【长期记忆】x\n\n" + Compactor.HEADER))
-        assertEquals("自定义指令", ContextAssembly.system("自定义指令", "", null))
-        val prompt = ContextAssembly.prompt(sys, ContextAssembly.forPlanner(agent, s, true))
-        assertEquals(PromptMessage.SYSTEM, prompt.first().role); assertEquals("下一个", prompt.last().content)
+        val sys = ContextAssembly.system("自定义指令", "【长期记忆】x")
+        assertEquals("自定义指令\n\n【长期记忆】x", sys)
+        assertEquals("自定义指令", ContextAssembly.system("自定义指令", ""))
+        val prompt = ContextAssembly.prompt(sys, ContextAssembly.forPlanner(agent, s, true), ContextAssembly.lead(s))
+        assertEquals(PromptMessage.SYSTEM, prompt.first().role); assertEquals(sys, prompt.first().content)
+        assertTrue(prompt.last().content.startsWith(Compactor.HEADER)); assertTrue(prompt.last().content.endsWith("下一个"))
     }
 
     @Test fun autoCompactionRulesPerMode() {
