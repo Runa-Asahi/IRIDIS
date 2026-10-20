@@ -874,6 +874,7 @@ fun AppearancePage(vm: SettingsViewModel, onBack: () -> Unit) {
                 Divider()
                 SwitchRow("提示音", s.sound, subtitle = "发送和回复完成时的轻柔提示音；静音、勿扰或语音对话时不响", icon = com.iris.localai.ui.icons.IrisIcons.Sound) { on -> vm.update { it.copy(sound = on) } }
             }
+            RenderSettingsSection(s, vm::update) // 2.2 渲染网页代码 / 加载网络图片
         }
     }
 }

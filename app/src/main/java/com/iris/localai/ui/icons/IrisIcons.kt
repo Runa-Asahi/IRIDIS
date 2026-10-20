@@ -119,4 +119,27 @@ object IrisIcons {
 
     /** 设置 (2.1, sliders) */
     val Settings: ImageVector by lazy { icon("Settings", "M4 7h9 M17 7h3 M15 4.5v5 M4 17h3 M11 17h9 M9 14.5v5") }
+
+    // ---- 2.2 rich rendering (网页预览 / 图片查看) ----
+
+    /** 源码 */
+    val Code: ImageVector by lazy { icon("Code", "M8.5 7L3.5 12l5 5 M15.5 7l5 5-5 5 M13.5 4.5l-3 15") }
+
+    /** 全屏 */
+    val Expand: ImageVector by lazy { icon("Expand", "M4 9V4h5 M20 9V4h-5 M4 15v5h5 M20 15v5h-5") }
+
+    /** 图片 */
+    val Image: ImageVector by lazy { icon("Image", "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M3 16l5-5 4 4 3-3 6 6 M15.5 8.5h0.01") }
+
+    /** 保存到相册 */
+    val Download: ImageVector by lazy { icon("Download", "M12 4v11 M7.5 10.5L12 15l4.5-4.5 M5 20h14") }
+
+    /** 分享 */
+    val Share: ImageVector by lazy { icon("Share", "M12 15V4 M8 7.5L12 3.5l4 4 M6 11v8a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-8") }
+
+    /** 关闭 */
+    val Close: ImageVector by lazy { icon("Close", "M6 6l12 12 M18 6L6 18") }
+
+    /** 复制 */
+    val Copy: ImageVector by lazy { icon("Copy", "M9 9h9a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z M4 15V6a2 2 0 0 1 2-2h9") }
 }

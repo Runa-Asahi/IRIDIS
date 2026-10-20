@@ -112,5 +112,15 @@
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
         </receiver>
+        <!-- 2.2: shares a chat image (a copy in cache/shared) with other apps; nothing else is exposed. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/shared_paths" />
+        </provider>
     </application>
 </manifest>

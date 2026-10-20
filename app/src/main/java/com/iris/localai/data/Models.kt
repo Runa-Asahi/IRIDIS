@@ -283,6 +283,10 @@ data class AppSettings(
     val thermalLimitC: Int = 0,
     /** 2.1.0 引用知识库: 对话 replies quote up to 3 snippets from workspace/knowledge (only when it has files). */
     val knowledgeInChat: Boolean = true,
+    /** 2.2 渲染网页代码: a closed ```html / ```svg block (or a whole-reply HTML document) shows as a sandboxed preview card. */
+    val renderHtml: Boolean = true,
+    /** 2.2 加载网络图片: https images in replies and previews (fetched by the app, public hosts only, no cookies). */
+    val loadNetworkImages: Boolean = true,
 
     // ---- 1.7.8 ----
     /**

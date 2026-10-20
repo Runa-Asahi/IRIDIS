@@ -488,7 +488,7 @@ object WebFetchTool : AgentTool {
     override val name = "web_fetch"
     override val label = "网页读取"
     override val description = "联网读取一个网页的文字（和联网搜索一起默认开启，每次询问）"
-    override val promptLine = "web_fetch(url): read a page found by web_search"
+    override val promptLine = "web_fetch(url): read a page found by web_search (+images)"
     override val risk = ToolRisk.NETWORK
     // 1.12.0: on by default with web_search (Claude Code / OpenCode pair search with fetch): a
     // search hit the model could not open was a dead end. Still asks (a URL can carry data out).
@@ -498,8 +498,13 @@ object WebFetchTool : AgentTool {
         val fetcher = env.fetcher ?: return ToolResult(false, "Error: network is not available", "不可用")
         val r = fetcher.fetch(url.trim())
         if (r.status !in 200..299) return ToolResult(false, "Error: HTTP ${r.status} for ${r.finalUrl}", "HTTP ${r.status}")
-        val text = if (r.contentType?.contains("html", ignoreCase = true) != false && r.body.contains('<')) HtmlText.toText(r.body) else r.body
-        return ToolResult(true, capTokens("[${r.finalUrl}]\n$text", env.outputTokens), "${text.length} 字")
+        val html = r.contentType?.contains("html", ignoreCase = true) != false && r.body.contains('<')
+        val text = if (html) HtmlText.toText(r.body) else r.body
+        // 2.2: a few page images (og:image, <img> with alt) the reply can show as ![alt](url).
+        val images = if (html) HtmlText.images(r.body, r.finalUrl) else emptyList()
+        val tail = if (images.isEmpty()) "" else "\nImages (show with ![alt](url)):\n" + images.joinToString("\n") { it.markdown() }
+        val budget = env.outputTokens - com.iris.localai.util.TokenEstimator.estimate(tail)
+        return ToolResult(true, capTokens("[${r.finalUrl}]\n$text", budget.coerceAtLeast(env.outputTokens / 2)) + tail, "${text.length} 字")
     }
 }
 
@@ -530,6 +535,46 @@ object AgentTools {
 
 /** Builds text from HTML for web_fetch (scripts, styles and tags removed, entities decoded). Pure. */
 object HtmlText {
+    private val META = Regex("(?is)<meta\\b[^>]*>")
+    private val IMG = Regex("(?is)<img\\b[^>]*>")
+    private fun attr(tag: String, name: String): String? =
+        Regex("(?is)\\b$name\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))").find(tag)?.let { m ->
+            m.groupValues.drop(1).firstOrNull { it.isNotEmpty() }
+        }
+    private val SKIP = Regex("(?i)(logo|icon|sprite|avatar|pixel|spacer|blank|badge|tracking|1x1)")
+
+    /**
+     * 2.2: up to [max] images of a page for web_fetch: og:image / twitter:image first, then <img> that
+     * carry alt text. Absolute https only, no data: / svg / tracking pixels / logos; duplicates dropped.
+     */
+    fun images(html: String, baseUrl: String, max: Int = 3): List<com.iris.localai.data.ChatImage> {
+        val base = runCatching { java.net.URI(baseUrl) }.getOrNull()
+        val title = Regex("(?is)<title[^>]*>(.*?)</title>").find(html)?.groupValues?.get(1)?.let { toText(it) }?.take(60).orEmpty()
+        fun abs(raw: String?): String? {
+            val u = raw?.trim()?.replace("&amp;", "&")?.takeIf { it.isNotEmpty() } ?: return null
+            val resolved = runCatching { if (base != null) base.resolve(u.replace(" ", "%20")).toString() else u }.getOrNull() ?: return null
+            if (!resolved.startsWith("https://", ignoreCase = true)) return null
+            val path = resolved.substringBefore('?').lowercase()
+            if (path.endsWith(".svg") || SKIP.containsMatchIn(path.substringAfterLast('/'))) return null
+            return resolved
+        }
+        val out = LinkedHashMap<String, String>()
+        for (m in META.findAll(html)) {
+            val key = (attr(m.value, "property") ?: attr(m.value, "name"))?.lowercase() ?: continue
+            if (key != "og:image" && key != "og:image:url" && key != "og:image:secure_url" && key != "twitter:image") continue
+            abs(attr(m.value, "content"))?.let { out.putIfAbsent(it, title) }
+        }
+        for (m in IMG.findAll(html)) {
+            if (out.size >= max) break
+            val alt = attr(m.value, "alt")?.let { toText(it) }?.trim().orEmpty()
+            if (alt.length < 2) continue
+            val w = attr(m.value, "width")?.toIntOrNull()
+            if (w != null && w < 64) continue
+            abs(attr(m.value, "src") ?: attr(m.value, "data-src"))?.let { out.putIfAbsent(it, alt.take(60)) }
+        }
+        return out.entries.take(max).map { com.iris.localai.data.ChatImage(it.key, it.value) }
+    }
+
     private val DROP = Regex("(?is)<(script|style|noscript|svg|head)\\b.*?</\\1>")
     private val BREAK = Regex("(?i)<(br|/p|/div|/li|/h[1-6]|/tr|/section|/article)\\b[^>]*>")
     private val TAG = Regex("(?s)<[^>]+>")

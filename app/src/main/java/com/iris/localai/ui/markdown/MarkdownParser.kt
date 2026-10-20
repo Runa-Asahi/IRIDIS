@@ -7,6 +7,8 @@ package com.iris.localai.ui.markdown
  * Supported: ATX headings, paragraphs, fenced code (``` and ~~~, unterminated fences render
  * as code while streaming), block quotes, ordered/unordered/task lists with nesting,
  * GitHub tables, thematic breaks, and $$ display math (shown as code).
+ * 2.2: a closing fence must be at least as long as its opening fence (CommonMark), so a ````html
+ * block may contain ``` lines; `![alt](url)` inside a paragraph becomes its own [MdBlock.Image].
  */
 sealed interface MdBlock {
     data class Heading(val level: Int, val text: String) : MdBlock
@@ -16,6 +18,8 @@ sealed interface MdBlock {
     data class ListItem(val depth: Int, val marker: String, val text: String, val checked: Boolean?) : MdBlock
     data class Table(val header: List<String>, val align: List<Align>, val rows: List<List<String>>) : MdBlock
     data object Rule : MdBlock
+    /** 2.2: `![alt](url)` split out of a paragraph; [url] is classified by [ImageRefs] when shown. */
+    data class Image(val alt: String, val url: String) : MdBlock
 
     enum class Align { START, CENTER, END }
 }
@@ -35,7 +39,7 @@ object MarkdownParser {
         val out = ArrayList<MdBlock>()
         val para = StringBuilder()
         fun flush() {
-            if (para.isNotBlank()) out += MdBlock.Paragraph(para.toString().trim())
+            if (para.isNotBlank()) out += splitImages(para.toString().trim())
             para.setLength(0)
         }
 
@@ -54,7 +58,7 @@ object MarkdownParser {
                 i++
                 while (i < lines.size) {
                     val l = lines[i]
-                    if (l.trim().startsWith(marker.take(3)) && l.trim().all { it == marker[0] }) { closed = true; break }
+                    if (closesFence(l, marker)) { closed = true; break }
                     if (code.isNotEmpty()) code.append('\n')
                     code.append(l)
                     i++
@@ -137,6 +141,31 @@ object MarkdownParser {
             i++
         }
         flush()
+        return out
+    }
+
+    /** CommonMark: same character, at least as long as the opening fence, nothing else on the line. */
+    internal fun closesFence(line: String, marker: String): Boolean {
+        val t = line.trim()
+        return t.length >= marker.length && t.all { it == marker[0] }
+    }
+
+    /** `![alt](url "title")`; url without spaces (data: URIs included), optionally in <…>. */
+    internal val IMAGE = Regex("!\\[([^\\]\\n]*)]\\(\\s*<?([^)\\s>]+)>?(?:\\s+\"[^\"]*\")?\\s*\\)")
+
+    /** A paragraph without images stays one [MdBlock.Paragraph]; images become [MdBlock.Image] between text parts. */
+    internal fun splitImages(text: String): List<MdBlock> {
+        if (!text.contains("![")) return listOf(MdBlock.Paragraph(text))
+        val out = ArrayList<MdBlock>()
+        var last = 0
+        for (m in IMAGE.findAll(text)) {
+            val before = text.substring(last, m.range.first).trim()
+            if (before.isNotEmpty()) out += MdBlock.Paragraph(before)
+            out += MdBlock.Image(m.groupValues[1].trim(), m.groupValues[2])
+            last = m.range.last + 1
+        }
+        val rest = text.substring(last).trim()
+        if (rest.isNotEmpty()) out += MdBlock.Paragraph(rest)
         return out
     }
 
