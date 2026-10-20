@@ -74,7 +74,15 @@ class MainActivity : ComponentActivity() {
     private val chat: ChatViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        // 2.1.5: fully transparent system bars (no auto scrim) and no navigation-bar contrast scrim,
+        // so the chat background / page colour runs under the gesture pill. Icon light/dark is set
+        // per app theme in IrisTheme.
+        enableEdgeToEdge(
+            statusBarStyle = androidx.activity.SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = androidx.activity.SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+        )
+        window.isNavigationBarContrastEnforced = false
+        window.isStatusBarContrastEnforced = false
         super.onCreate(savedInstanceState)
         val container = (application as IrisApp).container
         if (container.settings.current.apiEnabled && !ApiService.status.value.running) {

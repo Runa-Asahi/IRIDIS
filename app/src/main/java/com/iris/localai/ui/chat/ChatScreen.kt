@@ -417,11 +417,14 @@ fun ChatScreen(
             }
 
             // ---- Top bar: solid, no translucent scrim over the messages (user request, 1.5.0) ----
+            // 2.1.5: with a custom background the bar (status-bar area included) is see-through like
+            // the cards, so the picture runs full-bleed to the top edge instead of being cut off.
+            val hasBgImage = settings.backgroundImage.isNotEmpty()
             Column(
                 Modifier
                     .fillMaxWidth()
                     .onSizeChanged { topBarHeight = it.height }
-                    .background(c.chatBackground)
+                    .background(chatTopBarColor(c.chatBackground, hasBgImage))
                     .statusBarsPadding(),
             ) {
                 Row(
@@ -467,11 +470,13 @@ fun ChatScreen(
             }
 
             // 1.12.0: the gesture-bar strip under the composer is opaque, so the end of a reply never
-            // shows through below the composer card.
-            Spacer(
+            // shows through below the composer card. 2.1.5: it is the page colour (no different-coloured
+            // strip), and with a custom background it is not drawn at all — the picture runs under the
+            // home pill; the composer still keeps navigationBarsPadding so it sits above the pill.
+            if (!hasBgImage) Spacer(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                     .windowInsetsBottomHeight(androidx.compose.foundation.layout.WindowInsets.navigationBars)
-                    .background(Iris.colors.background),
+                    .background(c.chatBackground),
             )
             // ---- Composer (frosted glass) ----
             Column(
@@ -955,3 +960,10 @@ private fun RememberDialog(
         }
     }
 }
+
+/** 2.1.5: chat top bar fill — opaque page colour, or card-like translucency over a custom background. */
+internal fun chatTopBarColor(page: androidx.compose.ui.graphics.Color, backgroundImage: Boolean): androidx.compose.ui.graphics.Color =
+    if (backgroundImage) page.copy(alpha = CHAT_TOP_BAR_BACKDROP_ALPHA) else page
+
+/** Same see-through level as cards over a custom background ([com.iris.localai.ui.theme.overBackdrop] surfaceElevated). */
+internal const val CHAT_TOP_BAR_BACKDROP_ALPHA = 0.88f

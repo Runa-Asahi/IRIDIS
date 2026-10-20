@@ -173,6 +173,8 @@ fun IrisTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
+            // 2.1.5: no system contrast scrim behind the gesture pill (HyperOS draws one otherwise).
+            window.isNavigationBarContrastEnforced = false
             WindowCompat.getInsetsController(window, view).apply {
                 isAppearanceLightStatusBars = !dark
                 isAppearanceLightNavigationBars = !dark
