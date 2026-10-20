@@ -49,3 +49,13 @@
     public static int v(...);
     public static int d(...);
 }
+
+# ---- 2.2.0: Qualcomm GenieX (full flavour) ----
+# libnpu_jni.so (downloaded at runtime) binds Java_com_geniex_sdk_* by name and reads/creates the
+# bean classes' fields and constructors by name (LlmCreateInput, ModelConfig, GenerationConfig,
+# SamplerConfig, ChatMessage, LlmGenerateResult, ProfilingData, LLMTokenCallback.onToken …).
+-keep class com.geniex.sdk.** { *; }
+-keep interface com.geniex.sdk.** { *; }
+-dontwarn com.geniex.sdk.**
+# Vlm.extractMediaPaths returns a kotlin.Pair built in native code.
+-keep class kotlin.Pair { <init>(...); *; }

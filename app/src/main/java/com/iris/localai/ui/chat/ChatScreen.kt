@@ -617,6 +617,7 @@ fun ChatScreen(
             // 1.10.3: 「建议：这个模型在 CPU 上加载更快（可选）」 from the load records.
             cpuFaster = { m -> com.iris.localai.engine.CpuFasterHint.shouldShow(loadRecords.values, m.id, vm.preferredBackendLabel(m)) },
             onSwitchToCpu = vm::switchModelToCpu,
+            engineTag = { m -> vm.engineTag(m) },
         )
     }
     configureModel?.let { m -> com.iris.localai.ui.models.ModelConfigSheet(m, onDismiss = { configureModel = null }) }

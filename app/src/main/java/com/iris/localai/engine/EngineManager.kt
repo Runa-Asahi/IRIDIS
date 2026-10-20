@@ -136,7 +136,27 @@ class EngineManager(
     fun environment(): BackendEnvironment = BackendEnvironment.probe(appContext)
 
     fun backendOptions(model: LocalModel): List<BackendOption> =
-        BackendCapabilities.options(model.format, model.fileName, environment())
+        BackendCapabilities.options(model.format, model.fileName, environment(), engineFor(model))
+
+    /**
+     * 2.2.0: which engine runs [model]: GenieX for AI Hub QAIRT folders and for GGUF files set to
+     * GenieX (per model or as the default GGUF engine) when this build has it; llama.cpp otherwise.
+     */
+    fun engineFor(model: LocalModel, cfg: com.iris.localai.data.EffectiveModelConfig = effective(model)): String = when {
+        model.format == ModelFormat.QAIRT -> com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX
+        model.format == ModelFormat.GGUF && cfg.engine == com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX &&
+            EngineFactory.geniex(appContext) != null -> com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX
+        else -> com.iris.localai.engine.geniex.GenieX.ENGINE_LLAMA
+    }
+
+    /** 2.2.0: this build has the GenieX engine (full flavour). */
+    val hasGeniex: Boolean get() = EngineFactory.geniex(appContext) != null
+
+    /** 2.2.0: "GenieX · NPU" for a model GenieX would run (the backend a load starts with), else null. */
+    fun geniexTag(model: LocalModel): String? =
+        if (engineFor(model) == com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX)
+            runCatching { com.iris.localai.engine.geniex.GenieX.tag(preferredBackend(model)) }.getOrNull()
+        else null
 
     /** Global defaults merged with [model]'s own overrides. */
     fun effective(model: LocalModel? = readyModel): com.iris.localai.data.EffectiveModelConfig =
@@ -315,7 +335,7 @@ class EngineManager(
                 for (backend in chain) {
                     if (abandoned()) break
                     plan = threadPolicy.plan(useTier, cfg.threads, backend)
-                    e = EngineFactory.create(appContext, model.format)
+                    e = EngineFactory.create(appContext, model.format, engineFor(model, cfg))
                     crashMemory.arm(model.id, backend)
                     if (!abandoned()) _state.value = EngineState.Loading(model, (_state.value as? EngineState.Loading)?.progress ?: 0f, since, applyingTier, backend)
                     val loadStart = System.currentTimeMillis()

@@ -115,6 +115,15 @@ android {
             useLegacyPackaging = true
             // 1.12.0: proot (Termux build, NEEDED patched) ships as-is, never re-stripped.
             keepDebugSymbols += setOf("**/libproot.so", "**/libproot-loader.so", "**/libtalloc.so", "**/libandroid-shmem.so")
+            // 2.2.0: GenieX (geniex-android 0.8.0, full flavour) ships 51 native libraries (≈ 82 MB AAR).
+            // None go into the APK: the ones this phone needs are downloaded on demand from Maven
+            // Central into app storage (GenieXRuntime, 设置 › 模型与后端), like the LiteRT NPU runtime.
+            // No name overlaps ours (libiris_llama / libiris_mnn / liblitertlm_jni / sherpa).
+            excludes += setOf(
+                "**/libnpu_jni.so", "**/libgeniex*.so", "**/libllama.so", "**/libllama-common.so", "**/libmtmd.so",
+                "**/libggml*.so", "**/libomp.so", "**/libQnn*.so", "**/libhta_hexagon_runtime_*.so",
+                "**/libPlatformValidatorShared.so", "**/libcalculator.so", "**/libCalculator_skel.so",
+            )
         }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -160,6 +169,8 @@ dependencies {
 
     // Google LiteRT-LM runtime (.litertlm models: Gemma 4, Qwen3.5, …) — full flavour only
     "fullImplementation"(libs.litertlm.android)
+    // Qualcomm GenieX 0.8.0 (GGUF on Hexagon / AI Hub QAIRT bundles) — full flavour only; classes only (see packaging).
+    "fullImplementation"(libs.geniex.android)
     // sherpa-onnx: on-device ASR (SenseVoice), VAD (Silero) and TTS (Kokoro). Fetched by
     // scripts/fetch-deps.sh with a pinned SHA-256. The static-link build folds onnxruntime
     // into one library (≈3 MB smaller than the shared build, one less .so to load).

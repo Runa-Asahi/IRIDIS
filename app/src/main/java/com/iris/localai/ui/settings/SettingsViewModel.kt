@@ -67,6 +67,18 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     fun cancelNpu() { npuJob?.cancel(); npuJob = null }
     fun deleteNpu() { cancelNpu(); npu?.delete() }
 
+    // ---- 2.2.0: GenieX runtime (full flavour only) ----
+    val geniex = com.iris.localai.engine.EngineFactory.geniex(app)
+    private var geniexJob: Job? = null
+    fun installGeniex() {
+        val g = geniex ?: return
+        if (geniexJob?.isActive == true) return
+        geniexJob = c.scope.launch { g.install() }
+    }
+    fun cancelGeniex() { geniexJob?.cancel(); geniexJob = null }
+    fun deleteGeniex() { cancelGeniex(); geniex?.delete() }
+    fun setGgufEngine(engine: String) = update { it.copy(ggufEngine = engine) }
+
     // ---- speed test ----
     sealed interface Bench {
         data object Idle : Bench

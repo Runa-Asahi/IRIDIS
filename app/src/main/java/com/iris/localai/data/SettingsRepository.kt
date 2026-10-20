@@ -117,6 +117,7 @@ fun AppSettings.sanitized(): AppSettings {
             ModelFormat.entries.any { it.name == k } && com.iris.localai.engine.Backend.parse(v) != null
         },
         kvCacheType = kvCacheType.coerceIn(-1, 2),
+        ggufEngine = com.iris.localai.engine.geniex.GenieX.parseEngine(ggufEngine) ?: d.ggufEngine,
         repeatLastN = repeatLastN.coerceIn(0, 2048),
         presencePenalty = presencePenalty.clampOr(-2f, 2f, d.presencePenalty),
         frequencyPenalty = frequencyPenalty.clampOr(-2f, 2f, d.frequencyPenalty),

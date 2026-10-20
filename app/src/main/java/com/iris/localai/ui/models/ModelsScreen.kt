@@ -96,6 +96,10 @@ class ModelsViewModel(app: Application) : AndroidViewModel(app) {
     val models = c.models.models
     val engine = c.engine.state
     val busy = c.engine.busy
+    /** 2.2.0: "GenieX · NPU" for models GenieX runs (null = llama.cpp / the format's own engine). */
+    fun engineTag(m: LocalModel): String? = runCatching { c.engine.geniexTag(m) }.getOrNull()
+    val modelConfigs = c.modelConfigs.configs
+    val settingsFlow = c.settings.settings
     /** Current models folder (2.1.0: Download/IRIDIS/models with 全部文件访问) — re-read on resume. */
     data class Folder(val path: String, val shared: Boolean)
     private val _folder = MutableStateFlow<Folder?>(null)
@@ -173,6 +177,8 @@ fun ModelsScreen(onBack: () -> Unit, vm: ModelsViewModel = viewModel()) {
     val models by vm.models.collectAsStateWithLifecycle()
     val engine by vm.engine.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
+    val modelConfigs by vm.modelConfigs.collectAsStateWithLifecycle()
+    val appSettings by vm.settingsFlow.collectAsStateWithLifecycle()
     val import by vm.import.collectAsStateWithLifecycle()
     var confirmDelete by remember { mutableStateOf<LocalModel?>(null) }
     var configure by remember { mutableStateOf<LocalModel?>(null) }
@@ -334,6 +340,7 @@ fun ModelsScreen(onBack: () -> Unit, vm: ModelsViewModel = viewModel()) {
                         if (!first) Divider()
                         ModelRow(
                             m,
+                            tag = remember(m.id, modelConfigs, appSettings.ggufEngine, appSettings.defaultBackends) { vm.engineTag(m) },
                             state = engine,
                             busy = busy != null,
                             onLoad = { vm.load(m) },
@@ -423,16 +430,18 @@ private fun MnnDownloadDialog(onDismiss: () -> Unit, onDownload: (String) -> Uni
 }
 
 /** Picker line with the backend: the real one once loaded, otherwise the one a load would start with. */
-internal fun LocalModel.pickerMeta(loadedBackend: String?, preferredBackend: String): String = when {
+internal fun LocalModel.pickerMeta(loadedBackend: String?, preferredBackend: String, engineTag: String? = null): String = when {
     loadedBackend != null -> listOfNotNull(loadedBackend, quantization, Format.bytes(sizeBytes)).joinToString(" · ")
+    // 2.2.0: models run by GenieX show 「GenieX · NPU」 instead of the format label + backend.
+    engineTag != null -> listOfNotNull(engineTag, quantization, Format.bytes(sizeBytes)).joinToString(" · ")
     else -> listOfNotNull(format.label, preferredBackend.ifBlank { null }, quantization, Format.bytes(sizeBytes)).joinToString(" · ")
 }
 
-/** "GGUF · Q4_K_M · 2.3 GB" */
-internal fun LocalModel.metaLine(): String = listOfNotNull(format.label, quantization, Format.bytes(sizeBytes)).joinToString(" · ")
+/** "GGUF · Q4_K_M · 2.3 GB"; 2.2.0: 「GenieX · NPU · Q4_0 · 2.3 GB」 when GenieX runs it ([engineTag]). */
+internal fun LocalModel.metaLine(engineTag: String? = null): String = listOfNotNull(engineTag ?: format.label, quantization, Format.bytes(sizeBytes)).joinToString(" · ")
 
 @Composable
-private fun ModelRow(m: LocalModel, state: EngineState, busy: Boolean, onLoad: () -> Unit, onDelete: () -> Unit, onSettings: () -> Unit, onCancelLoad: () -> Unit = {}) {
+private fun ModelRow(m: LocalModel, tag: String? = null, state: EngineState, busy: Boolean, onLoad: () -> Unit, onDelete: () -> Unit, onSettings: () -> Unit, onCancelLoad: () -> Unit = {}) {
     val c = Iris.colors
     val loaded = (state as? EngineState.Ready)?.model?.path == m.path
     val loading = (state as? EngineState.Loading)?.model?.path == m.path
@@ -445,7 +454,7 @@ private fun ModelRow(m: LocalModel, state: EngineState, busy: Boolean, onLoad: (
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(m.displayName, style = IrisType.rowStrong, color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(m.metaLine(), style = IrisType.caption, color = c.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(m.metaLine(tag), style = IrisType.caption, color = c.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(IrisDimens.space8))
         when {

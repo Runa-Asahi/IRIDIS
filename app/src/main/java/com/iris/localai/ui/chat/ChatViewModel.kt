@@ -402,6 +402,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
             ?: com.iris.localai.engine.LiveResourcePolicy.backendNote((engine as? EngineState.Ready)?.details?.activeBackend)
 
     fun preferredBackendLabel(m: LocalModel): String = runCatching { c.engine.preferredBackend(m).label }.getOrDefault("")
+    /** 2.2.0: 「GenieX · NPU」 when GenieX would run [m], else null. */
+    fun engineTag(m: LocalModel): String? = runCatching { c.engine.geniexTag(m) }.getOrNull()
 
     // ------------------------------------------------------------------ context management
 

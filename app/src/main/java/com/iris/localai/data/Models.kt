@@ -134,7 +134,9 @@ enum class ModelFormat(val label: String, val extensions: Set<String>) {
     GGUF("GGUF · llama.cpp", setOf("gguf")),
     LITERT("LiteRT-LM", setOf("litertlm", "task")),
     /** A folder (taobao-mnn layout: config.json + llm.mnn + llm.mnn.weight + tokenizer.txt …). */
-    MNN("MNN", emptySet());
+    MNN("MNN", emptySet()),
+    /** 2.2.0: a Qualcomm AI Hub (QAIRT / Genie) bundle folder: genie_config.json + *.bin + tokenizer.json. Run by GenieX, NPU only. */
+    QAIRT("GenieX · QAIRT", emptySet());
 
     companion object {
         fun fromFileName(name: String): ModelFormat? {
@@ -151,9 +153,13 @@ data class LocalModel(
     val format: ModelFormat,
 ) {
     val id: String get() = fileName
-    val displayName: String get() = if (format == ModelFormat.MNN) ModelNames.displayMnn(fileName) else ModelNames.display(fileName)
-    val quantization: String? get() = if (format == ModelFormat.MNN) null else ModelNames.quantization(fileName)
-    val isFolder: Boolean get() = format == ModelFormat.MNN
+    val displayName: String get() = when (format) {
+        ModelFormat.MNN -> ModelNames.displayMnn(fileName)
+        ModelFormat.QAIRT -> com.iris.localai.engine.geniex.QairtBundle.displayName(fileName)
+        else -> ModelNames.display(fileName)
+    }
+    val quantization: String? get() = if (isFolder) null else ModelNames.quantization(fileName)
+    val isFolder: Boolean get() = format == ModelFormat.MNN || format == ModelFormat.QAIRT
 }
 
 @Serializable
@@ -295,6 +301,10 @@ data class AppSettings(
     val haptics: Boolean = true,
     /** 提示音: tiny soft sounds; never while silenced, in DND or during a voice session. */
     val sound: Boolean = true,
+
+    // ---- 2.2.0 ----
+    /** 默认 GGUF 引擎: "llama" (built-in llama.cpp) or "geniex" (Qualcomm GenieX, full flavour); per-model override in ModelOverrides.engine. */
+    val ggufEngine: String = "llama",
 )
 
 /** How a conversation's history is fitted into the model's context window. */

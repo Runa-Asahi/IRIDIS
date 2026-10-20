@@ -63,8 +63,12 @@ class ModelRepository(private val context: Context) {
     private fun entryOf(f: File, mnn: Boolean = ModelFormat.MNN in EngineFactory.supportedFormats): LocalModel? {
         if (f.name.endsWith(PART_SUFFIX) || f.name.startsWith(".")) return null
         if (f.isDirectory) {
-            if (!mnn || !MnnModels.isModelDir(f)) return null
-            return LocalModel(f.name, f.absolutePath, MnnModels.folderSize(f), ModelFormat.MNN)
+            if (mnn && MnnModels.isModelDir(f)) return LocalModel(f.name, f.absolutePath, MnnModels.folderSize(f), ModelFormat.MNN)
+            // 2.2.0: Qualcomm AI Hub QAIRT bundle folders (GenieX, full flavour).
+            if (ModelFormat.QAIRT in EngineFactory.supportedFormats &&
+                com.iris.localai.engine.geniex.QairtBundle.isFileSet(f.list().orEmpty().toSet())
+            ) return LocalModel(f.name, f.absolutePath, MnnModels.folderSize(f), ModelFormat.QAIRT)
+            return null
         }
         val format = ModelFormat.fromFileName(f.name)?.takeIf { it in EngineFactory.supportedFormats } ?: return null
         val size = f.length() // 0 for directories / missing files
@@ -209,6 +213,7 @@ class ModelRepository(private val context: Context) {
      */
     suspend fun importFolder(tree: Uri, onProgress: (Float) -> Unit): LocalModel = withContext(Dispatchers.IO) {
         if (ModelFormat.MNN !in EngineFactory.supportedFormats) throw IOException("此版本不支持 MNN 模型")
+        val qairt = ModelFormat.QAIRT in EngineFactory.supportedFormats
         val resolver = context.contentResolver
         val rootId = android.provider.DocumentsContract.getTreeDocumentId(tree)
         data class Entry(val rel: String, val docId: String, val size: Long)
@@ -240,8 +245,13 @@ class ModelRepository(private val context: Context) {
         }
         walk(rootId, "", 0)
         val topNames = entries.filter { '/' !in it.rel }.map { it.rel }.toSet()
-        if (!MnnModels.isModelFileSet(topNames)) {
-            throw IOException("所选文件夹不是 MNN 模型：需要包含 config.json 和 llm.mnn（例如 taobao-mnn/Qwen3-1.7B-MNN 仓库的全部文件）")
+        val folderFormat = when {
+            MnnModels.isModelFileSet(topNames) -> ModelFormat.MNN
+            qairt && com.iris.localai.engine.geniex.QairtBundle.isFileSet(topNames) -> ModelFormat.QAIRT
+            else -> throw IOException(
+                "所选文件夹不是 MNN 模型：需要包含 config.json 和 llm.mnn（例如 taobao-mnn/Qwen3-1.7B-MNN 仓库的全部文件）" +
+                    if (qairt) "；也不是 AI Hub QAIRT 包（需要 genie_config.json / metadata.json 和 .bin 分片）" else "",
+            )
         }
         val folderName = sanitizeFileName(
             resolver.query(android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, rootId),
@@ -292,7 +302,7 @@ class ModelRepository(private val context: Context) {
             activeParts.remove(part.name)
         }
         refresh()
-        LocalModel(target.name, target.absolutePath, MnnModels.folderSize(target), ModelFormat.MNN)
+        LocalModel(target.name, target.absolutePath, MnnModels.folderSize(target), folderFormat)
     }
 
     /** Lets [MnnHub] write `<name>.part` folders without [refresh] deleting them underneath it. */
