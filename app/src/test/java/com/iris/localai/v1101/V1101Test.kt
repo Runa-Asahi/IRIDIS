@@ -85,8 +85,8 @@ class V1101Test {
         // pins what 1.10.1 promised that still holds — the same pills on the same actions; the
         // layout itself is pinned by v1102/V1102Test.
         val composer = source("src/main/java/com/iris/localai/ui/chat/Composer.kt")
-        val body = composer.substringAfter("fun Composer(").substringBefore("private fun HoldToTalkButton").replace(Regex("\\s+"), " ")
-        assertEquals(2, Regex("ComposerPill\\(").findAll(body).count())
+        val body = composer.substringAfter("fun Composer(").substringBefore("private fun ListeningIndicator").replace(Regex("\\s+"), " ")
+        assertEquals(3, Regex("ComposerPill\\(").findAll(body).count())
         assertEquals(1, Regex("SpeedChip\\(").findAll(body).count())
         assertTrue(body.contains("ComposerText.AGENT, selected = state.agentMode, onClick = onToggleAgent"))
         assertTrue(body.contains("ComposerText.THINK, selected = state.deepThinking, enabled = state.thinkingSupported"))
@@ -100,9 +100,10 @@ class V1101Test {
         assertTrue(screen.contains("resourceTier = settings.resourceTier"))
         assertTrue(screen.contains("onThinkingUnsupported = { vm.showNotice(ComposerText.THINK_UNSUPPORTED) }"))
         // Nothing lost: voice input (press and hold) and voice chat are still reachable.
-        assertTrue(body.contains("HoldToTalkButton(state.listening, onHoldToTalkStart, onHoldToTalkEnd)"))
-        assertTrue(body.contains("onClick = onVoiceMode"))
-        assertTrue(composer.contains("onClick = onStop") && composer.contains("onClick = onSend"))
+        // 2.2: both now live in the one voice capsule (long-press / tap).
+        assertTrue(body.contains("onHoldStart = onHoldToTalkStart") && body.contains("onHoldEnd = onHoldToTalkEnd"))
+        assertTrue(body.contains("onCall = onVoiceMode"))
+        assertTrue(composer.contains("onStop = onStop") && composer.contains("onSend = onSend"))
     }
 
     @Test fun modelSheetAndSettingsShowSpeedLabels() {

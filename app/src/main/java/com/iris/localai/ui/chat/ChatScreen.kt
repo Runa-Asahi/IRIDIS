@@ -160,6 +160,8 @@ fun ChatScreen(
     var remembering by remember { mutableStateOf<com.iris.localai.data.ChatMessage?>(null) }
     // 1.10.12: attachments waiting for the next send (already copied into app storage).
     var pending by remember { mutableStateOf<List<com.iris.localai.data.Attachment>>(emptyList()) }
+    /** 2.2 「技能」: references picked for the next message. */
+    var refs by remember { mutableStateOf<List<com.iris.localai.data.TurnRef>>(emptyList()) }
     fun addPicked(uris: List<android.net.Uri>) {
         if (uris.isNotEmpty()) scope.launch {
             val room = com.iris.localai.util.Attachments.MAX_PER_MESSAGE - pending.size
@@ -524,7 +526,12 @@ fun ChatScreen(
                         resourceNote = vm.resourceStatus(tierApply, ui.engine),
                         agentMode = agentSettings.agentMode,
                         attachments = pending,
+                        refs = refs,
                     ),
+                    refCatalog = vm::refCatalog,
+                    onAddRef = { r -> refs = com.iris.localai.data.TurnRefs.add(refs, r) },
+                    onRemoveRef = { r -> refs = refs - r },
+                    onHoldToTalkCancel = { if (listening) { listening = false; vm.dictation.cancel() } },
                     onPickPhotos = { pickPhotos.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                     onPickFiles = { pickFiles.launch(arrayOf("*/*")) },
                     onRemoveAttachment = { a -> pending = pending - a; vm.discardAttachments(listOf(a)) },
@@ -546,7 +553,7 @@ fun ChatScreen(
                         // 2.0.x: editing a reply saves an edited version; editing a user message re-sends it.
                         val editingReply = id != null && ui.conversation.messages.firstOrNull { it.id == id }?.role == Role.ASSISTANT
                         if (id != null) { if (editingReply) vm.editAssistant(id, input) else vm.editAndResend(id, input) }
-                        else { vm.send(input, pending); pending = emptyList() }
+                        else { vm.send(input, pending, refs); pending = emptyList(); refs = emptyList() }
                         feedback.perform(com.iris.localai.ui.feedback.FeedbackEvent.SEND)
                         hideKeyboard()
                         input = ""

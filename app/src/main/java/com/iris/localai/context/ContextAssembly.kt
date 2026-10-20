@@ -27,13 +27,13 @@ object ContextAssembly {
         }
         return list
             // 1.13.0: an assistant reply with a notice-type error but real text stays in history.
-            .filter { (it.error == null || (it.role == Role.ASSISTANT && it.content.isNotBlank())) && (it.content.isNotBlank() || it.attachments.isNotEmpty() || (withTools && it.agentSteps.isNotEmpty())) }
+            .filter { (it.error == null || (it.role == Role.ASSISTANT && it.content.isNotBlank())) && (it.content.isNotBlank() || it.attachments.isNotEmpty() || it.refs.isNotEmpty() || (withTools && it.agentSteps.isNotEmpty())) }
             .map { m ->
                 CompactMsg(
                     m.id,
                     if (m.role == Role.USER) CompactMsg.USER else CompactMsg.ASSISTANT,
                     // 1.10.12: attached text files ride along with the user's words.
-                    if (m.role == Role.USER) (m.content + com.iris.localai.util.Attachments.promptBlock(m.attachments, vision)).trim() else ThinkParser.stripForHistory(m.content),
+                    if (m.role == Role.USER) com.iris.localai.data.TurnRefs.userText(m.content, com.iris.localai.util.Attachments.promptBlock(m.attachments, vision), m.refs) else ThinkParser.stripForHistory(m.content),
                     if (m.role == Role.ASSISTANT) m.agentSteps else emptyList(),
                 )
             }

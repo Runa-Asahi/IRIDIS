@@ -46,6 +46,8 @@ data class ChatMessage(
     val agentSteps: List<com.iris.localai.agent.AgentStep> = emptyList(),
     /** 1.10.12: files / pictures sent with a user message (copies in filesDir/attachments). */
     val attachments: List<Attachment> = emptyList(),
+    /** 2.2: skills / agent tools the user picked for this turn (「技能」 chip); one prompt line on this turn only. */
+    val refs: List<TurnRef> = emptyList(),
     /** 2.0.x: an assistant reply the user edited in place (shown as 「已编辑」). */
     val edited: Boolean = false,
     /**

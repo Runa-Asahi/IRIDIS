@@ -29,19 +29,12 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.AttachFile
-import androidx.compose.material.icons.outlined.Image
-import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.GraphicEq
-import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material.icons.rounded.ArrowUpward
-import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.rounded.Bolt
@@ -112,9 +105,11 @@ data class ComposerState(
     val agentMode: Boolean = false,
     /** 1.10.12: files / pictures waiting to be sent with the next message. */
     val attachments: List<com.iris.localai.data.Attachment> = emptyList(),
+    /** 2.2 「技能」: skills / tools picked for the next message (chips above the text). */
+    val refs: List<com.iris.localai.data.TurnRef> = emptyList(),
 )
 
-/** 1.10.2: the round button right of the mic — as in 1.10.0 (empty input = 语音对话). */
+/** 1.10.2: the round action (empty input = 语音对话). 2.2: the face of the one voice capsule ([VoiceCapsule]). */
 enum class ComposerAction { STOP, SEND, VOICE }
 
 /** 1.10.2: which round action shows (pure, unit-tested). */
@@ -139,12 +134,28 @@ object ComposerText {
     const val VOICE_INPUT = "语音输入"
     const val VOICE_MODE = "语音对话"
     const val HOLD_TO_TALK = "按住说话"
-    const val LISTENING = "正在聆听，松开结束"
+    const val LISTENING = "正在聆听，松开结束，上滑取消"
+    const val RELEASE_TO_CANCEL = "松开取消"
     const val TRANSCRIBING = "正在识别…"
     const val SPEED = "速度"
     const val ATTACH = "添加图片或文件"
     const val ATTACH_PHOTOS = "照片"
     const val ATTACH_FILES = "文件"
+    // 2.2 composer: one voice capsule + 「技能」.
+    const val CALL_HOLD = "通话，长按语音输入"
+    const val SEND = "发送"
+    const val STOP = "停止生成"
+    const val SKILLS = "技能"
+    const val SKILL_SEARCH = "搜索技能或工具"
+    const val SECTION_SKILLS = "已安装的技能"
+    const val SECTION_TOOLS = "智能体工具"
+    const val NO_SKILLS = "暂无技能"
+    const val NO_TOOLS = "没有已开启的工具"
+    const val NO_MATCH = "没有匹配项"
+    const val SKILL_TOOL_OFF = "技能工具已关闭（设置 › 智能体）"
+    const val SKILLS_EMPTY = "暂无可用的技能或工具"
+    const val AGENT_FOR_REF = "已切换到智能体模式：本条消息会使用所选技能/工具"
+    fun removeRef(name: String) = "移除 $name"
     fun agentNotice(on: Boolean): String =
         if (on) "已切换到智能体模式：可调用工具读写工作区文件（设置 › 智能体）" else "已切换到对话模式：不调用工具"
 }
@@ -172,6 +183,12 @@ fun Composer(
     onPickFiles: () -> Unit = {},
     onRemoveAttachment: (com.iris.localai.data.Attachment) -> Unit = {},
     onMoveAttachment: (from: Int, to: Int) -> Unit = { _, _ -> },
+    /** 2.2: slide up while holding the capsule → the dictation is thrown away. */
+    onHoldToTalkCancel: () -> Unit = {},
+    /** 2.2 「技能」: what the sheet lists (read when it opens), and adding / removing a reference. */
+    refCatalog: () -> RefCatalog = { RefCatalog.EMPTY },
+    onAddRef: (com.iris.localai.data.TurnRef) -> Unit = {},
+    onRemoveRef: (com.iris.localai.data.TurnRef) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val c = Iris.colors
@@ -208,7 +225,7 @@ fun Composer(
         // 1.10.2: 「智能体」 is a small pill in the card's top-left corner, above the text field
         // (user: 「智能体放左上」). Same colours as the 1.10.1 pills, just smaller.
         Row(
-            Modifier.fillMaxWidth().padding(start = 4.dp, top = 2.dp),
+            Modifier.fillMaxWidth().padding(start = 4.dp, top = 2.dp, end = 1.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ComposerPill(
@@ -218,15 +235,29 @@ fun Composer(
                 icon = com.iris.localai.ui.icons.IrisIcons.Agent,
                 compact = true,
             )
+            // 2.2 「技能」: pick an installed skill / agent tool for this message.
+            var skillSheet by remember { mutableStateOf(false) }
+            var catalog by remember { mutableStateOf(RefCatalog.EMPTY) }
+            Spacer(Modifier.width(6.dp))
+            ComposerPill(
+                ComposerText.SKILLS,
+                selected = state.refs.isNotEmpty(),
+                toggle = false,
+                onClick = { catalog = refCatalog(); skillSheet = true },
+                icon = com.iris.localai.ui.icons.IrisIcons.Skill,
+                compact = true,
+            )
+            if (skillSheet) SkillPickerSheet(catalog, onPick = { onAddRef(it); skillSheet = false }, onDismiss = { skillSheet = false })
             Spacer(Modifier.weight(1f))
             // 1.10.12: attach pictures / files — top-right, opposite 智能体, so the bottom row keeps its layout.
             // 1.10.13: a small IRIS menu first (user: not straight into the file manager).
+            // 2.2: a 「+」 as tall as the chips, its right edge on the capsule's right edge.
             var attachMenu by remember { mutableStateOf(false) }
             Box {
-                PressableIcon(Icons.Outlined.AttachFile, ComposerText.ATTACH, size = 32.dp, iconSize = 19.dp, tint = c.textSecondary, onClick = { attachMenu = true })
+                PressableIcon(com.iris.localai.ui.icons.IrisIcons.Plus, ComposerText.ATTACH, size = ComposerPillStyle.COMPACT_HEIGHT_DP.dp, iconSize = 22.dp, tint = c.textSecondary, onClick = { attachMenu = true })
                 com.iris.localai.ui.components.IrisMenu(attachMenu, { attachMenu = false }) {
-                    com.iris.localai.ui.components.IrisMenuItem(ComposerText.ATTACH_PHOTOS, Icons.Outlined.Image) { attachMenu = false; onPickPhotos() }
-                    com.iris.localai.ui.components.IrisMenuItem(ComposerText.ATTACH_FILES, Icons.Outlined.FolderOpen) { attachMenu = false; onPickFiles() }
+                    com.iris.localai.ui.components.IrisMenuItem(ComposerText.ATTACH_PHOTOS, com.iris.localai.ui.icons.IrisIcons.Image) { attachMenu = false; onPickPhotos() }
+                    com.iris.localai.ui.components.IrisMenuItem(ComposerText.ATTACH_FILES, com.iris.localai.ui.icons.IrisIcons.Folder) { attachMenu = false; onPickFiles() }
                 }
             }
         }
@@ -237,11 +268,19 @@ fun Composer(
         ) {
             AttachmentStrip(state.attachments, onRemove = onRemoveAttachment, onMove = onMoveAttachment, modifier = Modifier.padding(start = 6.dp, top = 6.dp, end = 6.dp))
         }
+        AnimatedVisibility(
+            visible = state.refs.isNotEmpty(),
+            enter = fadeIn(IrisMotion.enter()),
+            exit = fadeOut(IrisMotion.standard()),
+        ) {
+            RefChips(state.refs, onRemove = onRemoveRef, modifier = Modifier.padding(start = 6.dp, top = 6.dp, end = 6.dp))
+        }
 
         // 1.14.1: the text field stays in composition while dictating. Swapping it out (1.10–1.14.0)
         // dropped its focus, the keyboard closed, the composer jumped down by the IME height and the
         // finger ended up outside the mic button — which cancelled the hold and cut the dictation off.
         val recording = state.listening || state.transcribing
+        var cancelArmed by remember { mutableStateOf(false) }
         val fieldAlpha by animateFloatAsState(if (recording) 0f else 1f, IrisMotion.Color.float(), label = "fieldAlpha")
         Box {
                 BasicTextField(
@@ -273,7 +312,7 @@ fun Composer(
                 modifier = Modifier.matchParentSize(),
             ) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
-                    ListeningIndicator(state.micLevel, state.transcribing)
+                    ListeningIndicator(state.micLevel, state.transcribing, cancelArmed)
                 }
             }
         }
@@ -299,79 +338,29 @@ fun Composer(
                 SpeedChip(state.resourceTier, state.resourceNote, { composerTop }, onResourceTier)
                 Spacer(Modifier.width(4.dp))
             }
-            HoldToTalkButton(state.listening, onHoldToTalkStart, onHoldToTalkEnd)
-            Spacer(Modifier.width(6.dp))
+            // 2.2: one long accent capsule (users: the voice button was too small). Tap = 语音通话,
+            // long-press = 语音输入 (slide up to cancel); with text / attachments 发送, while generating 停止.
             val action = ComposerActions.of(generating = state.generating, hasText = state.text.isNotBlank(), hasAttachments = state.attachments.isNotEmpty())
-            AnimatedContent(
-                targetState = action,
-                transitionSpec = { motion(reduce) { IrisMotion.pop() } },
-                label = "action",
-            ) { a ->
-                when (a) {
-                    ComposerAction.STOP -> RoundAction(Icons.Rounded.Stop, "停止生成", onClick = onStop)
-                    ComposerAction.SEND -> RoundAction(Icons.Rounded.ArrowUpward, "发送", enabled = !state.transcribing, haptic = false, onClick = onSend)
-                    ComposerAction.VOICE -> RoundAction(com.iris.localai.ui.icons.IrisIcons.Voice, ComposerText.VOICE_MODE, onClick = onVoiceMode)
-                }
-            }
+            VoiceCapsuleButton(
+                action = action,
+                holding = state.listening,
+                micLevel = state.micLevel,
+                sendEnabled = !state.transcribing,
+                cancelArmed = cancelArmed,
+                onSend = onSend,
+                onStop = onStop,
+                onCall = onVoiceMode,
+                onHoldStart = onHoldToTalkStart,
+                onHoldEnd = onHoldToTalkEnd,
+                onHoldCancel = onHoldToTalkCancel,
+                onCancelArmed = { cancelArmed = it },
+            )
         }
     }
 }
 
-/**
- * 1.10.2: the 1.10.0 press-and-hold dictation button again, right of the pills: press = start
- * listening (same permission / recognition flow), release = transcribe into the input box.
- */
 @Composable
-private fun HoldToTalkButton(active: Boolean, onStart: () -> Unit, onEnd: () -> Unit) {
-    val c = Iris.colors
-    val haptics = com.iris.localai.ui.feedback.rememberIrisFeedback()
-    val start by rememberUpdatedState(onStart)
-    val end by rememberUpdatedState(onEnd)
-    val scale = animateFloatAsState(if (active) 1.15f else 1f, IrisMotion.Press.float(), label = "mic")
-    Box(
-        Modifier
-            .size(40.dp)
-            .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
-            .background(if (active) c.accentContainer else Color.Transparent, CircleShape)
-            .semantics { contentDescription = ComposerText.HOLD_TO_TALK }
-            .pointerInput(Unit) {
-                // 1.14.1: hold until the finger actually lifts. The old tap-gesture detector cancelled the press as
-                // soon as the pointer was outside the button (e.g. after a layout shift), ending dictation.
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    down.consume()
-                    com.iris.localai.ui.feedback.FeedbackVoice.dictating = true; haptics.perform(com.iris.localai.ui.feedback.FeedbackEvent.LISTEN_START)
-                    var ended = false
-                    start()
-                    try {
-                        while (true) {
-                            val e = awaitPointerEvent()
-                            e.changes.forEach { it.consume() }
-                            if (e.changes.none { it.pressed }) break
-                        }
-                    } finally {
-                        if (!ended) { ended = true; end(); haptics.perform(com.iris.localai.ui.feedback.FeedbackEvent.LISTEN_STOP); com.iris.localai.ui.feedback.FeedbackVoice.dictating = false }
-                    }
-                }
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(Icons.Outlined.Mic, null, tint = if (active) c.onAccentContainer else c.text, modifier = Modifier.size(21.dp))
-    }
-}
-
-@Composable
-private fun RoundAction(icon: ImageVector, label: String, enabled: Boolean = true, haptic: Boolean = true, onClick: () -> Unit) {
-    val c = Iris.colors
-    PressableIcon(
-        icon, label, size = 40.dp, iconSize = 21.dp,
-        tint = c.onAccent, background = if (enabled) c.accent else c.accent.copy(alpha = 0.35f), haptic = haptic,
-        enabled = enabled, onClick = onClick,
-    )
-}
-
-@Composable
-private fun ListeningIndicator(level: Float, transcribing: Boolean) {
+private fun ListeningIndicator(level: Float, transcribing: Boolean, cancelArmed: Boolean = false) {
     val c = Iris.colors
     Row(
         Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 12.dp),
@@ -380,8 +369,8 @@ private fun ListeningIndicator(level: Float, transcribing: Boolean) {
     ) {
         LevelBars(if (transcribing) 0f else level)
         Text(
-            if (transcribing) ComposerText.TRANSCRIBING else ComposerText.LISTENING,
-            style = IrisType.body, color = c.textSecondary,
+            if (transcribing) ComposerText.TRANSCRIBING else if (cancelArmed) ComposerText.RELEASE_TO_CANCEL else ComposerText.LISTENING,
+            style = IrisType.body, color = if (cancelArmed) c.danger else c.textSecondary,
             modifier = Modifier.pulse(transcribing),
         )
     }

@@ -98,6 +98,14 @@ fun UserMessage(
         if (message.attachments.isNotEmpty()) {
             AttachmentStrip(message.attachments, modifier = Modifier.padding(bottom = if (message.content.isNotBlank()) 6.dp else 0.dp))
         }
+        // 2.2 「技能」: the skills / tools this message pointed the agent at.
+        if (message.refs.isNotEmpty()) {
+            Text(
+                message.refs.joinToString("  ") { it.token },
+                style = IrisType.labelSmall, color = c.accent, maxLines = 2,
+                modifier = Modifier.padding(end = 4.dp, bottom = 4.dp),
+            )
+        }
         if (message.content.isNotBlank()) Box(
             Modifier
                 .clip(IrisRadius.bubbleShape)

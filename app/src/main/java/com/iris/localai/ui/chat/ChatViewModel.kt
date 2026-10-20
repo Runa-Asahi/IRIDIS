@@ -529,12 +529,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
 
     // ------------------------------------------------------------------ messaging
 
-    fun send(text: String, attachments: List<com.iris.localai.data.Attachment> = emptyList()) {
+    fun send(text: String, attachments: List<com.iris.localai.data.Attachment> = emptyList(), refs: List<com.iris.localai.data.TurnRef> = emptyList()) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() && attachments.isEmpty()) return
         if (viewingOther() || busy()) return
+        // 2.2 「技能」: a picked skill / tool needs the agent — turn 智能体 on for it.
+        if (com.iris.localai.data.TurnRefs.needsAgent(refs, c.agent.settings.current.agentMode)) { setAgentMode(true); notice.value = ComposerText.AGENT_FOR_REF }
         // 2.0.x: 「记住：…」 / "remember: …" is saved to MEMORY.md directly (both modes, no model call).
-        if (attachments.isEmpty()) com.iris.localai.memory.MemoryCommand.parse(trimmed)?.let { fact ->
+        if (attachments.isEmpty() && refs.isEmpty()) com.iris.localai.memory.MemoryCommand.parse(trimmed)?.let { fact ->
             rememberCommand(trimmed, fact)
             return
         }
@@ -547,7 +549,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
             val online = ag.agentMode && com.iris.localai.agent.AgentTools.all.any { ag.isEnabled(it) && it.name in com.iris.localai.agent.SearchText.NETWORK_TOOLS }
             com.iris.localai.agent.NetworkHint.forRequest(trimmed, ag.agentMode, online)?.let { notice.value = it }
         }
-        append(ChatMessage(role = Role.USER, content = trimmed, attachments = attachments))
+        append(ChatMessage(role = Role.USER, content = trimmed, attachments = attachments, refs = refs.distinct()))
         startReply(Requester.CHAT)
     }
 
@@ -579,7 +581,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         val imgs = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             originals.map { com.iris.localai.util.Attachments.visionCopy(it, side) }
         }
-        val text = (lastUser.content + com.iris.localai.util.Attachments.promptBlock(lastUser.attachments, true)).trim()
+        val text = com.iris.localai.data.TurnRefs.userText(lastUser.content, com.iris.localai.util.Attachments.promptBlock(lastUser.attachments, true), lastUser.refs)
         val i = com.iris.localai.util.VisionPrompt.targetIndex(messages, text)
         if (i < 0) {
             android.util.Log.w(GEN_TAG, "withImages: newest user message not found in the prompt → ${imgs.size} picture(s) not sent")
@@ -1142,6 +1144,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
 
     val agentSettings = c.agent.settings.settings
     fun setAgentMode(on: Boolean) = c.agent.settings.update { it.copy(agentMode = on) }
+
+    /** 2.2 「技能」 sheet: installed skills (only while the skill tool is on) and the enabled agent tools. */
+    fun refCatalog(): RefCatalog {
+        val ag = c.agent.settings.current
+        val tools = com.iris.localai.agent.AgentTools.all.filter { ag.isEnabled(it) && it.name != com.iris.localai.agent.SkillTool.name && it.name != com.iris.localai.agent.ActivateTool.name }
+        val skillOn = com.iris.localai.agent.AgentTools.all.any { it.name == com.iris.localai.agent.SkillTool.name && ag.isEnabled(it) }
+        val skills = if (skillOn) runCatching { c.agent.skills.all() }.getOrDefault(emptyList()) else emptyList()
+        return RefCatalog(
+            skills = skills.map { RefItem(com.iris.localai.data.TurnRef(com.iris.localai.data.TurnRefKind.SKILL, it.name), it.name, it.description) },
+            tools = tools.map { RefItem(com.iris.localai.data.TurnRef(com.iris.localai.data.TurnRefKind.TOOL, it.name), it.label, it.description) },
+            skillToolOff = !skillOn,
+        )
+    }
 
     /** 1.12.0: skills listed in the prompt (only while the skill tool is on). */
     private fun skillsFor(tools: List<com.iris.localai.agent.AgentTool>): List<com.iris.localai.agent.SkillInfo> =

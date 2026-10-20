@@ -24,9 +24,11 @@ class V1141Test {
     @Test fun dictationKeepsTheTextFieldAndHoldsUntilRelease() {
         val c = src("ui/chat/Composer.kt")
         assertTrue(c.contains("readOnly = recording"))
-        assertTrue(c.contains("awaitEachGesture"))
+        // 2.2: hold-to-talk lives in the voice capsule
+        val v = src("ui/chat/ComposerVoiceSkills.kt")
+        assertTrue(v.contains("awaitEachGesture"))
         assertFalse("hold-to-talk must not use detectTapGestures (cancels when the finger leaves the button)",
-            c.substringAfter("private fun HoldToTalkButton").substringBefore("private fun RoundAction").contains("detectTapGestures"))
+            v.substringAfter("internal fun VoiceCapsuleButton").substringBefore("// ---------").contains("detectTapGestures"))
     }
 
     @Test fun featureIconsUseIrisSet() {

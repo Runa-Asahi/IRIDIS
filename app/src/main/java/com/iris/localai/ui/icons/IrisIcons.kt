@@ -149,4 +149,24 @@ object IrisIcons {
 
     /** 复制 */
     val Copy: ImageVector by lazy { icon("Copy", "M9 9h9a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z M4 15V6a2 2 0 0 1 2-2h9") }
+
+    // ---- 2.2 composer ----
+
+    /** 添加（附件） */
+    val Plus: ImageVector by lazy { icon("Plus", "M12 5v14 M5 12h14") }
+
+    /** 发送 */
+    val Send: ImageVector by lazy { icon("Send", "M12 19V5.5 M6 11l6-6 6 6") }
+
+    /** 停止生成 (filled rounded square) */
+    val Stop: ImageVector by lazy { icon("Stop", "F:M8.5 7h7a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 7 15.5v-7A1.5 1.5 0 0 1 8.5 7z") }
+
+    /** 技能 (puzzle-ish spark: a book with a star) */
+    val Skill: ImageVector by lazy { icon("Skill", "M12 3l2.2 4.6 5 .7-3.6 3.5.9 5L12 14.4 7.5 16.8l.9-5L4.8 8.3l5-.7z M8 20.5h8") }
+
+    /** 搜索 */
+    val Search: ImageVector by lazy { icon("Search", "M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13z M15.5 15.5L20 20") }
+
+    /** 工具 (wrench) */
+    val Tool: ImageVector by lazy { icon("Tool", "M14.7 6.3a4 4 0 0 0 5 5L20 11.6a5 5 0 0 1-6.3 2.9L7.5 20.7a1.8 1.8 0 0 1-2.5-2.5l6.2-6.2A5 5 0 0 1 14 5.7z") }
 }

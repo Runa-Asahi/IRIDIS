@@ -55,7 +55,7 @@ class V1102Test {
     private fun flat(s: String) = s.replace(Regex("\\s+"), " ")
 
     private val composer by lazy { source("src/main/java/com/iris/localai/ui/chat/Composer.kt") }
-    private val composerBody by lazy { flat(composer.substringAfter("fun Composer(").substringBefore("private fun HoldToTalkButton")) }
+    private val composerBody by lazy { flat(composer.substringAfter("fun Composer(").substringBefore("private fun ListeningIndicator")) }
 
     // ================================================================ A. composer
 
@@ -79,12 +79,13 @@ class V1102Test {
         val field = b.indexOf("BasicTextField(")
         val think = b.indexOf("ComposerText.THINK,")
         val speed = b.indexOf("SpeedChip(state.resourceTier")
-        val mic = b.indexOf("HoldToTalkButton(")
+        // 2.2: the mic + round button became one voice capsule (see v220/V220ComposerTest)
         val action = b.indexOf("ComposerActions.of(")
+        val mic = b.indexOf("VoiceCapsuleButton(")
         assertTrue(field in 1 until think)
-        assertTrue(think < speed && speed < mic && mic < action)
-        // exactly the two toggle pills + one speed chip
-        assertEquals(2, Regex("ComposerPill\\(").findAll(b).count())
+        assertTrue(think < speed && speed < action && action < mic)
+        // 智能体 + 技能 (2.2) + 思考 pills + one speed chip
+        assertEquals(3, Regex("ComposerPill\\(").findAll(b).count())
         assertEquals(1, Regex("SpeedChip\\(").findAll(b).count())
     }
 
@@ -93,20 +94,19 @@ class V1102Test {
         assertFalse(composer.contains("DropdownMenuItem("))
         assertFalse(composerBody.contains("ComposerText.VOICE_INPUT"))
         assertFalse(composer.contains("Icons.Rounded.Add,"))
-        // press-and-hold, as in 1.10.0: press → start, release → end
-        val hold = flat(composer.substringAfter("private fun HoldToTalkButton").substringBefore("@Composable"))
-        // 1.14.1: own gesture loop that ends only when the finger lifts (see V1141Test)
+        // press-and-hold, as in 1.10.0: press → start, release → end.
+        // 2.2: now the long-press of the one voice capsule (tap = 语音对话, as the round button was).
+        val hold = flat(source("src/main/java/com/iris/localai/ui/chat/ComposerVoiceSkills.kt").substringAfter("internal fun VoiceCapsuleButton").substringBefore("// ---------"))
         assertTrue(hold.contains("awaitEachGesture"))
         val start = hold.indexOf("start()"); val wait = hold.indexOf("awaitPointerEvent()"); val end = hold.indexOf("end()", wait)
         assertTrue(start in 1 until wait && wait < end)
-        assertTrue(hold.contains("contentDescription = ComposerText.HOLD_TO_TALK"))
         assertEquals("按住说话", ComposerText.HOLD_TO_TALK)
         assertTrue(ComposerText.LISTENING.contains("松开结束"))
-        assertTrue(composerBody.contains("HoldToTalkButton(state.listening, onHoldToTalkStart, onHoldToTalkEnd)"))
-        // 语音对话 is the round button when the input is empty (where it was before 1.10.1)
-        assertTrue(composerBody.contains("ComposerAction.VOICE -> RoundAction(com.iris.localai.ui.icons.IrisIcons.Voice, ComposerText.VOICE_MODE, onClick = onVoiceMode)"))
-        assertTrue(composerBody.contains("ComposerAction.STOP -> RoundAction(Icons.Rounded.Stop, \"停止生成\", onClick = onStop)"))
-        assertTrue(composerBody.contains("onClick = onSend"))
+        assertTrue(composerBody.contains("onHoldStart = onHoldToTalkStart"))
+        assertTrue(composerBody.contains("onHoldEnd = onHoldToTalkEnd"))
+        assertTrue(composerBody.contains("onCall = onVoiceMode"))
+        assertTrue(composerBody.contains("onStop = onStop"))
+        assertTrue(composerBody.contains("onSend = onSend"))
         // ChatScreen still hands the same dictation start / end to the composer
         val screen = source("src/main/java/com/iris/localai/ui/chat/ChatScreen.kt")
         assertTrue(screen.contains("onHoldToTalkStart = {") && screen.contains("onHoldToTalkEnd = {"))
