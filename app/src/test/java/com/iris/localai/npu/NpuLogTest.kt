@@ -21,3 +21,18 @@ class NpuLogTest {
         assertEquals("I/qnn     ( 123): graph error code 1002", NpuLog.relevant(lines, 1))
     }
 }
+
+class NpuRetryTest {
+    @Test fun retriesSmallerKvOnlyBelowCompiledSize() {
+        assertEquals(listOf(null, 2048, 1536), com.iris.localai.engine.NpuRetry.kvAttempts(null))
+        assertEquals(listOf(4096, 2048, 1536), com.iris.localai.engine.NpuRetry.kvAttempts(4096))
+        assertEquals(listOf(1280), com.iris.localai.engine.NpuRetry.kvAttempts(1280))
+    }
+    @Test fun allocFailureDetected() {
+        org.junit.Assert.assertTrue(com.iris.localai.engine.NpuRetry.isAllocFailure("Inference warmup run for Text Decoder (prefill) failed"))
+        org.junit.Assert.assertFalse(com.iris.localai.engine.NpuRetry.isAllocFailure("QNN System library version mismatched"))
+    }
+    @Test fun fallbackKeepsErrors() {
+        assertEquals("E/foo( 1): boom", com.iris.localai.engine.NpuLog.fallback(listOf("I/foo( 1): ok", "E/foo( 1): boom"), 5))
+    }
+}

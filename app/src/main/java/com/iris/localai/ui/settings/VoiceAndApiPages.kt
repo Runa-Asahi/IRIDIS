@@ -289,7 +289,7 @@ fun ApiPage(vm: SettingsViewModel, onBack: () -> Unit) {
     SubpageScaffold("API 服务", onBack) {
         ScrollBody {
             PageDescription(
-                "开启后，本机或局域网内的其他 App（如 ChatBox、沉浸式翻译、Obsidian 插件、Open WebUI 等）可通过 OpenAI 兼容接口调用当前模型，也兼容 Ollama 的 /api/chat。",
+                "让 ChatBox、沉浸式翻译、Open WebUI 等 App 调用本机正在用的模型。支持 OpenAI 和 Ollama 接口。",
             )
             SettingsGroup {
                 SwitchRow(
@@ -297,7 +297,7 @@ fun ApiPage(vm: SettingsViewModel, onBack: () -> Unit) {
                     subtitle = when {
                         status.error != null -> status.error
                         status.running -> "运行中"
-                        else -> "关闭时不占用任何资源"
+                        else -> "已关闭"
                     },
                 ) { on ->
                     if (on && Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -321,12 +321,12 @@ fun ApiPage(vm: SettingsViewModel, onBack: () -> Unit) {
                         keyboardActions = KeyboardActions(onDone = { applyPort() }),
                     )
                     IrisButton(
-                        "应用", ::applyPort, style = IrisButtonStyle.Text, compact = true,
+                        "保存", ::applyPort, style = IrisButtonStyle.Text, compact = true,
                         enabled = portValid && portText != s.apiPort.toString(),
                     )
                 }
                 Divider()
-                SwitchRow("允许局域网访问", s.apiAllowLan, subtitle = "开启后同一 Wi-Fi 下的设备可访问，必须使用 API Key") { vm.setLan(it) }
+                SwitchRow("允许局域网访问", s.apiAllowLan, subtitle = "同一 Wi-Fi 下的电脑、平板也能连接，需要 API Key") { vm.setLan(it) }
             }
 
             SectionTitle("API Key")
@@ -337,7 +337,7 @@ fun ApiPage(vm: SettingsViewModel, onBack: () -> Unit) {
                 ) {
                     SelectionContainer(Modifier.weight(1f).padding(vertical = 12.dp)) {
                         Text(
-                            s.apiKey.ifBlank { "未设置（仅本机访问时可不设）" },
+                            s.apiKey.ifBlank { "未设置 · 只在本机用可以不设" },
                             style = if (s.apiKey.isBlank()) IrisType.secondary else IrisType.mono,
                             color = if (s.apiKey.isBlank()) c.textTertiary else c.text,
                         )

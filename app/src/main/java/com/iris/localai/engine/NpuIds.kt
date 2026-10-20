@@ -118,7 +118,11 @@ object FirstReplyFallback {
  */
 /** 2.1.1: picks the NPU-relevant lines (QNN / LiteRT dispatch / FastRPC) out of a logcat dump. */
 object NpuLog {
-    private val KEYS = listOf("qnn", "htp", "dispatch", "adsprpc", "fastrpc", "cdsp", "rpcmem", "litert", "skel")
+    private val KEYS = listOf(
+        "qnn", "htp", "dispatch", "adsprpc", "fastrpc", "cdsp", "rpcmem", "litert", "skel",
+        // 2.1.2: the warm-up failure itself is logged by tflite / the LM executor, not QNN.
+        "tflite", "allocate", "tensor", "enomem", "mmap", "dmabuf",
+    )
     private val LEVEL = Regex("^[EWF]/")
 
     fun relevant(lines: List<String>, max: Int): String =
@@ -127,6 +131,23 @@ object NpuLog {
             .distinct()
             .takeLast(max)
             .joinToString("\n")
+
+    /** 2.1.2: when no line matches, the last error / fatal lines of our own process instead of nothing. */
+    fun fallback(lines: List<String>, max: Int): String =
+        lines.filter { Regex("^[EF]/").containsMatchIn(it) }.map { it.trim().take(240) }.distinct().takeLast(max).joinToString("\n")
+}
+
+/**
+ * 2.1.2: Gemma 4 sm8750 failed prefill warm-up with 「Failed to allocate tensors」 on a Redmi K90 even
+ * with the full runtime. Retry with smaller KV sizes (LiteRT-LM #2018: Gemma 4 needs ≥ 1536 =
+ * prefill chunk + sliding window) before giving up. null = the size compiled into the file.
+ */
+object NpuRetry {
+    val SMALLER = listOf(2048, 1536)
+
+    fun isAllocFailure(msg: String): Boolean = msg.lowercase().let { "allocate" in it || "warmup" in it }
+
+    fun kvAttempts(npuKv: Int?): List<Int?> = (listOf(npuKv) + SMALLER.filter { npuKv == null || it < npuKv }).distinct()
 }
 
 object NpuRuntimeFiles {

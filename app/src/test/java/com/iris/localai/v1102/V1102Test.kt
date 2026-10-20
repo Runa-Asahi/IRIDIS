@@ -182,7 +182,9 @@ class V1102Test {
         val lt = flat(source("src/full/java/com/iris/localai/engine/litert/LiteRtEngine.kt"))
         // 2.0: the NPU default is per family (NpuIds.defaultKv: Gemma 4 NPU 4096, unknown 1024), still a pure function of the file.
         assertTrue(lt.contains("maxTokens = com.iris.localai.engine.LiteRtLoadKey.maxNumTokens(config.contextLength, npuFile, npuKv, com.iris.localai.engine.NpuIds.defaultKv(model.fileName))"))
-        assertTrue(lt.contains("maxNumTokens = if (name == \"NPU\") npuKv else maxTokens"))
+        // 2.1.2: NPU walks NpuRetry.kvAttempts(npuKv) (compiled size first, then 2048 / 1536 on an allocation failure).
+        assertTrue(lt.contains("if (name == \"NPU\") com.iris.localai.engine.NpuRetry.kvAttempts(npuKv) else listOf(maxTokens)"))
+        assertTrue(lt.contains("maxNumTokens = kv,"))
         assertTrue(lt.contains("java.io.File(context.filesDir, CACHE_DIR)"))
         assertTrue(lt.contains("const val CACHE_DIR = \"litert-cache\""))
         assertTrue(lt.contains("cacheDir = if (name == \"NPU\") null else cacheRoot.path"))

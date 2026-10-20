@@ -68,7 +68,7 @@ class V220GenieXTest {
     @Test fun geniexGgufOffersNpuGpuCpuAndDefaultsToNpu() {
         val o = BackendCapabilities.options(ModelFormat.GGUF, "Qwen3-4B-Q4_0.gguf", ready, GenieX.ENGINE_GENIEX)
         assertTrue(o.all { it.available })
-        assertTrue(o.first { it.backend == Backend.NPU }.detail.startsWith("GenieX"))
+        assertEquals("最快，Q4_0 模型效果最好", o.first { it.backend == Backend.NPU }.detail) // 2.1.2: short, the sheet already names the engine
         assertEquals(Backend.NPU, BackendCapabilities.autoBackend(ModelFormat.GGUF, "Qwen3-4B-Q4_0.gguf", o))
         // no OpenCL → GPU greyed out with the reason
         val noCl = BackendCapabilities.options(ModelFormat.GGUF, "a.gguf", ready.copy(hasOpenCl = false), GenieX.ENGINE_GENIEX)

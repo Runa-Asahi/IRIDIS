@@ -138,6 +138,9 @@ class LiteRtEngine(private val context: Context) : InferenceEngine {
             // images can be read; a file without a vision section that refuses it loads text-only.
             val wantVision = com.iris.localai.util.VisionModels.litertMayHaveVision(model.fileName)
             outer@ for ((name, make) in candidates) {
+                val kvs: List<Int?> = if (name == "NPU") com.iris.localai.engine.NpuRetry.kvAttempts(npuKv) else listOf(maxTokens)
+                for ((kvIndex, kv) in kvs.withIndex()) {
+                if (kvIndex > 0 && !com.iris.localai.engine.NpuRetry.isAllocFailure(errors.toString())) break
                 for (vision in if (wantVision && name != "NPU") listOf(true, false) else listOf(false)) {
                 var e: Engine? = null
                 try {
@@ -146,7 +149,7 @@ class LiteRtEngine(private val context: Context) : InferenceEngine {
                             modelPath = model.path,
                             backend = make(),
                             visionBackend = if (vision) (if (name == "GPU") Backend.GPU() else Backend.CPU()) else null,
-                            maxNumTokens = if (name == "NPU") npuKv else maxTokens,
+                            maxNumTokens = kv,
                             // NPU files are AOT-compiled: no cache (a stale one from another runtime can break init), like Gallery.
                             cacheDir = if (name == "NPU") null else cacheRoot.path,
                         ),
@@ -155,10 +158,13 @@ class LiteRtEngine(private val context: Context) : InferenceEngine {
                     engine = e
                     visionOn = vision
                     backend = if (name == "NPU") "NPU · Hexagon · LiteRT-LM" else "$name · LiteRT-LM"
+                    if (name == "NPU" && kv != null) maxTokens = kv
                     break@outer
                 } catch (t: Throwable) {
                     runCatching { e?.close() }
-                    errors.append("[$name${if (vision) "+视觉" else ""}] ").append(rootMessage(t)).append('\n')
+                    val kvTag = if (name == "NPU") " 上下文 ${kv ?: "默认"}" else ""
+                    errors.append("[$name${if (vision) "+视觉" else ""}$kvTag] ").append(rootMessage(t)).append('\n')
+                }
                 }
                 }
             }
@@ -172,7 +178,8 @@ class LiteRtEngine(private val context: Context) : InferenceEngine {
                     when {
                         npuModel != null ->
                             "NPU 初始化失败。常见原因：系统 DSP 固件与运行库版本不兼容，或模型不是为本机芯片编译的。\n$msg" +
-                                npuLogTail().let { if (it.isEmpty()) "" else "\n── 原生日志（QNN / FastRPC）──\n$it" }
+                                "── 设备 ──\n" + npuDeviceInfo(modelFile) +
+                                npuLogTail().let { if (it.isEmpty()) "\n（没有读到原生日志）" else "\n── 原生日志 ──\n$it" }
                         "npu" in lower || "dispatch" in lower || "signature" in lower ->
                             "该模型是为特定芯片(NPU)编译的版本，请改用通用 .litertlm 文件\n$msg"
                         model.fileName.endsWith(".task", ignoreCase = true) ->
@@ -460,7 +467,18 @@ class LiteRtEngine(private val context: Context) : InferenceEngine {
         )
         val lines = p.inputStream.bufferedReader().use { r -> r.readLines() }
         p.waitFor()
-        com.iris.localai.engine.NpuLog.relevant(lines, max)
+        com.iris.localai.engine.NpuLog.relevant(lines, max).ifEmpty { com.iris.localai.engine.NpuLog.fallback(lines, max) }
+    }.getOrDefault("")
+
+    /** 2.1.2: what a remote diagnosis needs, in one block under the NPU error. */
+    private fun npuDeviceInfo(modelFile: java.io.File): String = runCatching {
+        val am = context.getSystemService(android.app.ActivityManager::class.java)
+        val mi = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        val gb = { b: Long -> "%.1f GB".format(b / 1e9) }
+        val soc = if (android.os.Build.VERSION.SDK_INT >= 31) android.os.Build.SOC_MODEL else "?"
+        "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · $soc · Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.VERSION.INCREMENTAL}\n" +
+            "内存 可用 ${gb(mi.availMem)} / ${gb(mi.totalMem)}${if (mi.lowMemory) " · 低内存" else ""}\n" +
+            "模型 ${modelFile.length()} B · ${java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date(modelFile.lastModified()))}"
     }.getOrDefault("")
 
     private fun rootMessage(t: Throwable): String =

@@ -313,6 +313,14 @@ object GenieXTurns {
     }
 }
 
+/** 2.1.2: GenieX GGUF on Hexagon sometimes finished a regenerate with no tokens at all. */
+object GenieXRetry {
+    const val EMPTY_MESSAGE = "模型这次没有输出任何内容。已清空缓存，再点一次重新生成试试；仍然没有就换 GPU 后端。"
+
+    fun shouldRetryEmpty(attempt: Int, cancelled: Boolean, emptyOutput: Boolean, reason: com.iris.localai.engine.StopReason?): Boolean =
+        attempt == 0 && !cancelled && emptyOutput && reason != com.iris.localai.engine.StopReason.CANCELLED
+}
+
 /** What the app shows and drives for the downloadable GenieX runtime (implemented in the full flavour). */
 interface GenieXSupport {
     /** e.g. "SM8750 · Hexagon V79"; null when this chip cannot run GenieX. */
@@ -344,9 +352,9 @@ object GenieXRules {
         if (b != null) return Backend.entries.map { com.iris.localai.engine.BackendOption(it, false, b) }
         val noCl = "本机没有可用的 OpenCL 驱动"
         return listOf(
-            com.iris.localai.engine.BackendOption(Backend.CPU, true, detail = "GenieX · llama.cpp CPU"),
-            com.iris.localai.engine.BackendOption(Backend.GPU, env.hasOpenCl, if (env.hasOpenCl) null else noCl, "GenieX · Adreno OpenCL"),
-            com.iris.localai.engine.BackendOption(Backend.NPU, true, detail = "GenieX · Hexagon（Q4_0 最快）"),
+            com.iris.localai.engine.BackendOption(Backend.CPU, true, detail = "最稳，速度一般"),
+            com.iris.localai.engine.BackendOption(Backend.GPU, env.hasOpenCl, if (env.hasOpenCl) null else noCl, "显卡加速"),
+            com.iris.localai.engine.BackendOption(Backend.NPU, true, detail = "最快，Q4_0 模型效果最好"),
         )
     }
 

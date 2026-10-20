@@ -135,10 +135,9 @@ class GenieXEngine(context: Context) : InferenceEngine {
             }
             cached = emptyList()
             backendLabel = when {
-                qairt -> "${GenieX.tag(Backend.NPU)} · QAIRT"
-                backend == Backend.NPU -> "${GenieX.tag(backend)} · Hexagon · llama.cpp"
-                backend == Backend.GPU -> "${GenieX.tag(backend)} · Adreno OpenCL · llama.cpp"
-                else -> "${GenieX.tag(backend)} · llama.cpp"
+                // 2.1.2: short labels — the sheet and chat header only need engine + backend.
+                qairt -> "${GenieX.tag(Backend.NPU)}（QAIRT）"
+                else -> GenieX.tag(backend)
             } + if (visionOk) " · 视觉" else ""
             Log.i(TAG, "loaded ${model.fileName}: $backendLabel ctx=$ctx threads=$threads mmproj=${mmproj != null}")
             onProgress(1f)
@@ -187,7 +186,9 @@ class GenieXEngine(context: Context) : InferenceEngine {
             val started = System.currentTimeMillis()
             val out = StringBuilder()
             try {
-                if (qairt && !GenieXTurns.canContinue(cached, turns)) {
+                // 2.1.2: GGUF too. llama.cpp's prefix rollback on regenerate / edit left the Hexagon
+                // backend producing nothing; a history that does not extend the cache resets first.
+                if (!GenieXTurns.canContinue(cached, turns)) {
                     if (cached.isNotEmpty()) { l?.reset(); v?.reset() }
                     cached = emptyList()
                 }
@@ -219,6 +220,9 @@ class GenieXEngine(context: Context) : InferenceEngine {
                     slidingWindowNKeep = if (!qairt && params.contextShift) params.keepTokens.coerceAtLeast(0) else 0,
                 )
                 var done: GenEvent.Done? = null
+                var attempt = 0
+                while (true) {
+                done = null
                 val flow = v?.generateStreamFlow(prompt, gen) ?: l!!.generateStreamFlow(prompt, gen)
                 flow.collect { r ->
                     when (r) {
@@ -249,21 +253,29 @@ class GenieXEngine(context: Context) : InferenceEngine {
                         else -> {}
                     }
                 }
+                // 2.1.2: an empty reply that nobody stopped — reset the KV cache and try once more.
+                if (GenieXRetry.shouldRetryEmpty(attempt, cancelled, out.isEmpty(), done?.reason)) {
+                    attempt++
+                    withContext(NonCancellable) { runCatching { l?.reset(); v?.reset() } }
+                    continue
+                }
+                break
+                }
                 val d = done ?: GenEvent.Done(
                     if (cancelled) StopReason.CANCELLED else StopReason.END,
                     GenerationStats(generateMs = System.currentTimeMillis() - started),
                 )
                 // QAIRT: the cache now holds this conversation plus our reply (also a partial one after stop).
-                cached = if (qairt && d.reason != StopReason.ERROR) turns + GenieXTurns.Msg(PromptMessage.ASSISTANT, out.toString()) else emptyList()
-                if (qairt && d.reason == StopReason.ERROR) withContext(NonCancellable) { runCatching { l?.reset(); v?.reset() } }
-                send(d)
+                cached = if (d.reason != StopReason.ERROR && out.isNotEmpty()) turns + GenieXTurns.Msg(PromptMessage.ASSISTANT, out.toString()) else emptyList()
+                if (d.reason == StopReason.ERROR || out.isEmpty()) withContext(NonCancellable) { runCatching { l?.reset(); v?.reset() } }
+                send(if (out.isEmpty() && d.reason == StopReason.END && !cancelled) GenEvent.Done(StopReason.ERROR, d.stats, GenieXRetry.EMPTY_MESSAGE) else d)
             } catch (ce: kotlinx.coroutines.CancellationException) {
                 cached = emptyList()
                 throw ce
             } catch (t: Throwable) {
                 Log.w(TAG, "generate failed", t)
                 cached = emptyList()
-                if (qairt) withContext(NonCancellable) { runCatching { l?.reset(); v?.reset() } }
+                withContext(NonCancellable) { runCatching { l?.reset(); v?.reset() } }
                 send(GenEvent.Done(StopReason.ERROR, null, GenieX.error("GenieX 生成失败" + (GenieX.codeHint(t.message)?.let { "：$it" } ?: ""), t)))
             }
         }

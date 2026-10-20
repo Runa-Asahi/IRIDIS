@@ -121,8 +121,8 @@ fun ModelConfigSheet(model: LocalModel, onDismiss: () -> Unit) {
                                 )
                             }
                         },
-                        subtitle = "当前：" + (if (engineId == com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX) "GenieX（高通，NPU / GPU / CPU）" else "llama.cpp（内置）") +
-                            "。切换后后端回到「自动」，重新加载生效",
+                        subtitle = (if (engineId == com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX) "高通引擎，能用 NPU 加速" else "内置引擎，兼容性最好") +
+                            "。换引擎后重新加载生效",
                     )
                 }
             }
@@ -131,7 +131,7 @@ fun ModelConfigSheet(model: LocalModel, onDismiss: () -> Unit) {
             SectionTitle("后端")
             SettingsGroup {
                 BackendRow(
-                    "自动", "当前会选 ${auto.label}" + if (settings.defaultBackends[model.format.name] != null) "（跟随 ${model.format.label} 默认）" else "",
+                    "自动", "会用 ${auto.label}",
                     selected = o.backend == null, enabled = true,
                 ) { set { it.copy(backend = null) } }
                 options.forEach { opt ->
@@ -152,7 +152,7 @@ fun ModelConfigSheet(model: LocalModel, onDismiss: () -> Unit) {
             }
             loaded?.let { r ->
                 GroupFootnote(
-                    "实际在用：${r.details.backend}" + (r.details.fallbackNote?.let { "\n$it" } ?: ""),
+                    "正在用：${r.details.backend}" + (r.details.fallbackNote?.let { "\n$it" } ?: ""),
                 )
             }
             // 1.10.3: 「建议：这个模型在 CPU 上加载更快（可选）」 when its last GPU load was > 60 s and a CPU load was faster.
@@ -173,7 +173,7 @@ fun ModelConfigSheet(model: LocalModel, onDismiss: () -> Unit) {
                     )
                 }
             }
-            GroupFootnote("加载失败会按 NPU → GPU → CPU 回退；后端等修改重新加载后生效。")
+            GroupFootnote("加载失败会自动换 GPU、CPU 再试。改动重新加载后生效。")
 
             // ---- Behaviour ----
             SectionTitle("行为")

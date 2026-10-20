@@ -360,14 +360,14 @@ fun ModelsScreen(onBack: () -> Unit, vm: ModelsViewModel = viewModel()) {
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                "模型存在应用目录，卸载后会丢失", style = IrisType.secondary, color = c.textTertiary,
+                                "卸载 App 时这些模型会一起被删除", style = IrisType.secondary, color = c.textTertiary,
                                 modifier = Modifier.weight(1f).padding(start = IrisDimens.space16),
                             )
-                            IrisButton("开启全部文件访问", { openAllFilesAccess(context) }, style = IrisButtonStyle.Text, compact = true)
+                            IrisButton("改存到下载目录", { openAllFilesAccess(context) }, style = IrisButtonStyle.Text, compact = true)
                         }
                     }
                 }
-                GroupFootnote("推荐 Gemma 4 E2B / E4B（LiteRT，GPU）或 Qwen3.5 4B / 9B（MNN），点「下载模型」获取；也可把模型直接放进上面的目录。")
+                GroupFootnote("推荐 Gemma 4 E2B 或 Qwen3.5 4B，可在「下载模型」里获取，也能把模型文件直接拷进上面的文件夹。")
             }
         }
     }

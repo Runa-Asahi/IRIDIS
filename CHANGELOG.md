@@ -2,6 +2,12 @@
 
 发布版本记录见 [GitHub Releases](https://github.com/WWRJ3321/IRIDIS/releases)。本文件从开源首个版本开始记录。
 
+## 2.1.2（2026-10-20）
+
+- NPU：Gemma 4 预热分配失败时自动用 2048 / 1536 上下文重试；报错附设备信息和更全的原生日志。
+- GenieX：修复 GGUF 重新生成没有回答；后端标签简化。
+- 文案：模型名更易读（Gemma 4 E2B NPU）；存储、模型、API 页说明精简。
+
 ## 2.1.1（2026-10-20）
 
 ### NPU（LiteRT-LM）

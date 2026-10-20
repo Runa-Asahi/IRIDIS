@@ -348,6 +348,14 @@ object ModelNames {
             base = base.replace(Regex("[-_.]?${Regex.escape(q)}$", RegexOption.IGNORE_CASE), "")
         }
         val cleaned = base.replace(Regex("[_-]+"), " ").replace(Regex("\\s+"), " ").trim()
-        return cleaned.ifEmpty { fileName }
+        return polish(cleaned).ifEmpty { fileName }
+    }
+
+    /** "gemma 4 E2B it qualcomm sm8750" → "Gemma 4 E2B NPU": capitalised, no "it" suffix, chip tag → NPU. */
+    fun polish(name: String): String {
+        var n = name.replace(Regex("\\s+qualcomm\\s+sm\\d+\\b", RegexOption.IGNORE_CASE), " NPU")
+        n = n.replace(Regex("\\s+it(?=\\s|$)"), "")
+        n = n.replace(Regex("\\s+"), " ").trim()
+        return n.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
     }
 }

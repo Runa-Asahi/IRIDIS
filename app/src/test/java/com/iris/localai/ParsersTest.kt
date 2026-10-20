@@ -144,7 +144,9 @@ class ModelNamesTest {
     @Test fun displayNameAndQuant() {
         assertEquals("Qwen3 4B Instruct", ModelNames.display("Qwen3-4B-Instruct-Q4_K_M.gguf"))
         assertEquals("Q4_K_M", ModelNames.quantization("Qwen3-4B-Instruct-Q4_K_M.gguf"))
-        assertEquals("gemma3 1b it", ModelNames.display("gemma3-1b-it-int4.litertlm").lowercase())
+        assertEquals("Gemma3 1b", ModelNames.display("gemma3-1b-it-int4.litertlm"))
+        assertEquals("Gemma 4 E2B NPU", ModelNames.display("gemma-4-E2B-it_qualcomm_sm8750.litertlm"))
+        assertEquals("Gemma 4 E4B", ModelNames.display("gemma-4-E4B-it.litertlm"))
         assertEquals(ModelFormat.GGUF, ModelFormat.fromFileName("a.GGUF"))
         assertEquals(ModelFormat.LITERT, ModelFormat.fromFileName("a.litertlm"))
         assertEquals(null, ModelFormat.fromFileName("a.bin"))

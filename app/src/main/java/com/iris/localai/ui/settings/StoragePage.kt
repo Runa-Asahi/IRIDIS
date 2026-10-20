@@ -793,7 +793,7 @@ private fun ColumnScope.ModelsFolderRows(folder: StorageViewModel.ModelsFolder?,
         Divider()
         SettingsRow(
             ModelFolderText.MOVE, icon = com.iris.localai.ui.icons.IrisIcons.Folder,
-            subtitle = "${f.pendingCount} 个模型 · ${Format.bytes(f.pendingBytes)} · 移到公共目录后卸载重装也不会丢失" +
+            subtitle = "${f.pendingCount} 个模型 · ${Format.bytes(f.pendingBytes)} · 移过去后重装也不会丢" +
                 (move?.error?.let { " · 上次失败：$it" } ?: ""),
             subtitleMaxLines = 3,
             trailing = { IrisButton("移动", onMove, style = IrisButtonStyle.Text, compact = true) },
@@ -812,8 +812,8 @@ object StorageLayoutText {
 }
 
 object ModelFolderText {
-    const val MOVE = "把模型移到 下载/IRIDIS/models"
+    const val MOVE = "把模型移到下载目录"
     const val MOVING = "正在移动模型…"
-    const val GRANT_TITLE = "开启全部文件访问以保存模型到公共目录"
-    const val GRANT_HINT = "未开启 · 模型和语音模型保存在应用目录，卸载后会被删除；开启后存到 下载/IRIDIS/models 和 下载/IRIDIS/voice"
+    const val GRANT_TITLE = "改存到下载目录"
+    const val GRANT_HINT = "现在存在 App 里，卸载会一起删除。改存后放在 下载/IRIDIS，重装也不会丢"
 }
