@@ -118,9 +118,11 @@ class ContextPlannerTest {
     @Test fun summaryIsUsedAsLeadingContext() {
         val msgs = convo(10)
         val p = ContextPlanner.plan(req(msgs, ContextStrategy.SUMMARY, summary = "用户在规划旅行", summaryUpTo = "a5"))
-        assertTrue(p.messages[0].content.contains(ContextPlanner.SUMMARY_HEADER))
-        assertTrue(p.messages[0].content.contains("用户在规划旅行"))
-        assertEquals(msgs.first { it.id == "u6" }.content, p.messages[1].content)
+        // 2.3: the summary leads the history (joined to the first kept user turn); the system prompt is unchanged.
+        assertEquals("你是助手", p.messages[0].content)
+        assertTrue(p.messages[1].content.startsWith(ContextPlanner.SUMMARY_HEADER))
+        assertTrue(p.messages[1].content.contains("用户在规划旅行"))
+        assertTrue(p.messages[1].content.endsWith(msgs.first { it.id == "u6" }.content))
         assertEquals(12, p.droppedMessages)
         assertTrue(p.toSummarize.isEmpty())
     }

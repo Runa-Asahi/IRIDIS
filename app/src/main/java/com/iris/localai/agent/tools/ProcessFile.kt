@@ -19,7 +19,7 @@ object ProcessFileTool : SuspendTool {
     override val name = "process_file"
     override val label = "分段处理文件"
     override val description = "长文件分段翻译、总结或改写，结果写入新文件（可撤销）"
-    override val promptLine = "process_file(path, task, out?, start?: part): translate/summarize/convert a long file part by part into out"
+    override val promptLine = "process_file(path, task, out?, start?): translate/summarize long files in parts"
     override val risk = ToolRisk.WRITE
 
     /** Reads at most this much (larger files: ask the user to split them). */

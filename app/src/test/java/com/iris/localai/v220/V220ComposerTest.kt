@@ -109,7 +109,7 @@ class V220ComposerTest {
             ChatMessage(id = "3", role = Role.USER, content = "summarise a.pdf", refs = listOf(skill, tool)),
         )
         val plain = msgs.map { it.copy(refs = emptyList()) }
-        val system = ContextAssembly.system("BASE SYSTEM", "", null)
+        val system = ContextAssembly.system("BASE SYSTEM", "")
         fun prompt(m: List<ChatMessage>) = ContextAssembly.prompt(system, ContextAssembly.forPlanner(ContextAssembly.active(m, null, withTools = true), null, true))
         val withRefs = prompt(msgs)
         val without = prompt(plain)

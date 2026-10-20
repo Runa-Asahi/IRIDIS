@@ -35,6 +35,12 @@ data class ContextRequest(
     val system: String,
     val messages: List<CtxMessage>,
     val strategy: ContextStrategy,
+    /**
+     * 2.3: text that leads the history instead of joining the system prompt (the 智能体 compaction
+     * summary): it changes whenever the history is folded, and in the system prompt it forced the
+     * whole cached prefix to be prefilled again. Placed in front of the first kept message.
+     */
+    val lead: String = "",
     /** The model's real context window (tokens). */
     val contextTokens: Int,
     val maxNewTokens: Int,
@@ -94,8 +100,12 @@ object ContextPlanner {
             val i = active.indexOfFirst { it.id == r.summaryUpToId }
             if (i >= 0) { summary = r.summary; dropped += i + 1; active = active.drop(i + 1) }
         }
-        val system = buildSystem(r.system, summary)
-        val systemTokens = if (system.isBlank()) 0 else TokenEstimator.message(system)
+        // 2.3: the system prompt stays byte-identical for the KV cache; the summary (and the
+        // compaction lead) go in front of the history instead.
+        val system = r.system.trim()
+        val lead = leadText(r.lead, summary)
+        val systemTokens = (if (system.isBlank()) 0 else TokenEstimator.message(system)) +
+            (if (lead.isEmpty()) 0 else TokenEstimator.message(lead))
 
         var rounds = rounds(active)
 
@@ -125,7 +135,7 @@ object ContextPlanner {
                         val fold = rounds.take(n).flatten()
                         // The caller summarises, saves, and plans again; meanwhile this plan is still valid.
                         val fallback = budgetTrim(rounds, systemTokens, budget)
-                        return finish(system, fallback.first, dropped + fallback.second, budget, strategy, systemTokens)
+                        return finish(system, lead, fallback.first, dropped + fallback.second, budget, strategy, systemTokens)
                             .copy(toSummarize = fold)
                     }
                 }
@@ -137,7 +147,7 @@ object ContextPlanner {
         val keepFirst = strategy == ContextStrategy.TOKEN_BUDGET
         val (kept, d) = budgetTrim(rounds, systemTokens, budget, keepFirst)
         dropped += d
-        val plan = finish(system, kept, dropped, budget, strategy, systemTokens)
+        val plan = finish(system, lead, kept, dropped, budget, strategy, systemTokens)
         return if (strategy == ContextStrategy.KV_SHIFT) {
             plan.copy(contextShift = true, keepTokens = (systemTokens + 4).coerceAtMost(ctx / 4))
         } else plan
@@ -183,18 +193,30 @@ object ContextPlanner {
         return list to removedMsgs
     }
 
-    fun buildSystem(system: String, summary: String): String = listOf(
-        system.trim(),
+    /** 2.3: compaction lead + 自动摘要 summary (with its header), blank parts left out. */
+    fun leadText(lead: String, summary: String): String = listOf(
+        lead.trim(),
         summary.trim().takeIf { it.isNotEmpty() }?.let { "$SUMMARY_HEADER\n$it" }.orEmpty(),
     ).filter { it.isNotEmpty() }.joinToString("\n\n")
 
+    /**
+     * 2.3: [lead] in front of the history — joined to the first message when it is the user's
+     * (no extra turn, alternation kept for strict templates), else as a user turn of its own.
+     */
+    fun withLead(history: List<PromptMessage>, lead: String): List<PromptMessage> {
+        if (lead.isBlank()) return history
+        val first = history.firstOrNull()
+        return if (first != null && first.role == PromptMessage.USER) listOf(first.copy(content = lead.trim() + "\n\n" + first.content)) + history.drop(1)
+        else listOf(PromptMessage(PromptMessage.USER, lead.trim())) + history
+    }
+
     private fun finish(
-        system: String, rounds: List<List<CtxMessage>>, dropped: Int, budget: Int,
+        system: String, lead: String, rounds: List<List<CtxMessage>>, dropped: Int, budget: Int,
         applied: ContextStrategy, systemTokens: Int,
     ): ContextPlan {
         val msgs = ArrayList<PromptMessage>()
         if (system.isNotBlank()) msgs += PromptMessage(PromptMessage.SYSTEM, system)
-        rounds.flatten().forEach { msgs += PromptMessage(it.role, it.content) }
+        msgs += withLead(rounds.flatten().map { PromptMessage(it.role, it.content) }, lead)
         return ContextPlan(
             messages = msgs,
             droppedMessages = dropped,

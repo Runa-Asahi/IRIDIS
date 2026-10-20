@@ -15,7 +15,7 @@ import com.iris.localai.util.ThinkParser
  *  - in 智能体 mode an assistant message carries its tool steps rolled up, one line each, so the
  *    next turn knows what was already done (the 1.9.0 gap);
  *  - a compaction summary replaces the folded messages;
- *  - the frozen long-term-memory block and the summary join the system prompt.
+ *  - the frozen long-term-memory block joins the system prompt; 2.3: the summary leads the history.
  */
 object ContextAssembly {
 
@@ -44,12 +44,18 @@ object ContextAssembly {
     fun forPlanner(active: List<CompactMsg>, state: CompactState?, withTools: Boolean): List<CtxMessage> =
         Compactor.remaining(state, active).map { CtxMessage(it.id, it.role, it.promptText(withTools)) }
 
-    /** Base system prompt + memory + compaction summary, blank parts left out. */
-    fun system(base: String, memoryBlock: String, state: CompactState?): String = listOf(
+    /**
+     * Base system prompt + memory, blank parts left out. 2.3: the compaction summary is no longer
+     * part of it (see [lead]): the system prompt stays byte-identical across a compaction, so the
+     * engines keep its KV cache.
+     */
+    fun system(base: String, memoryBlock: String): String = listOf(
         base.trim(),
         memoryBlock.trim(),
-        state?.let { Compactor.render(it) }.orEmpty(),
     ).filter { it.isNotEmpty() }.joinToString("\n\n")
+
+    /** 2.3: the compaction summary, placed in front of the remaining history (ContextRequest.lead). */
+    fun lead(state: CompactState?): String = state?.let { Compactor.render(it) }.orEmpty()
 
     /**
      * Whether automatic compaction runs for this reply. 智能体: its own switch. 对话: its switch, and
@@ -63,7 +69,7 @@ object ContextAssembly {
         if (!inject || conv.memoryEpoch != epoch) "" else MemoryPrompt.block(conv.memorySnapshot.orEmpty(), MemoryPrompt.budget(contextTokens))
 
     /** Prompt messages of the base system + planner output, for tests and the agent prompt. */
-    fun prompt(system: String, history: List<CtxMessage>): List<PromptMessage> =
+    fun prompt(system: String, history: List<CtxMessage>, lead: String = ""): List<PromptMessage> =
         (if (system.isBlank()) emptyList() else listOf(PromptMessage(PromptMessage.SYSTEM, system))) +
-            history.map { PromptMessage(it.role, it.content) }
+            com.iris.localai.util.ContextPlanner.withLead(history.map { PromptMessage(it.role, it.content) }, lead)
 }

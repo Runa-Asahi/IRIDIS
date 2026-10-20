@@ -24,7 +24,7 @@ class V11012Test {
     // ---- prompt ----
     @Test fun promptHasSections() {
         val p = AgentPrompt.build(AgentTools.all, "简短")
-        listOf("# Tone", "# Doing tasks", "# Tool calls", "# Tools", "# User instructions").forEach { assertTrue(it, p.contains(it)) }
+        listOf("# Rules", "# Tool calls", "# Tools", "# User instructions") // 2.3: Tone + Doing tasks merged.forEach { assertTrue(it, p.contains(it)) }
         assertTrue(p.endsWith("简短"))
         assertTrue("~${TokenEstimator.estimate(p)}", TokenEstimator.estimate(p) <= 800)
     }

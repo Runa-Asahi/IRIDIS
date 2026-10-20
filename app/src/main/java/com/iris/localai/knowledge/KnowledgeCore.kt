@@ -202,4 +202,20 @@ object KbChat {
     /** Puts [block] in front of the message [id]'s text (prompt only; the stored message is untouched). Pure. */
     fun attach(msgs: List<com.iris.localai.util.CtxMessage>, id: String, block: String): List<com.iris.localai.util.CtxMessage> =
         msgs.map { if (it.id == id) com.iris.localai.util.CtxMessage(it.id, it.role, block + "\n\n" + it.content) else it }
+
+    /** 2.3: every message of [msgs] that has a block in [blocks] gets it in front (prompt only). Pure. */
+    fun attachAll(msgs: List<com.iris.localai.util.CtxMessage>, blocks: Map<String, String>): List<com.iris.localai.util.CtxMessage> =
+        if (blocks.isEmpty()) msgs
+        else msgs.map { m -> blocks[m.id]?.let { com.iris.localai.util.CtxMessage(m.id, m.role, it + "\n\n" + m.content) } ?: m }
+
+    /** 2.3: stores [block] for [id], keeping at most [MAX_KEPT] (oldest dropped first). */
+    fun remember(blocks: MutableMap<String, String>, id: String, block: String) {
+        blocks.remove(id)
+        blocks[id] = block
+        val it = blocks.keys.iterator()
+        while (blocks.size > MAX_KEPT && it.hasNext()) { it.next(); it.remove() }
+    }
+
+    /** Messages whose snippets stay in the prompt (older ones have usually left the window anyway). */
+    const val MAX_KEPT = 64
 }

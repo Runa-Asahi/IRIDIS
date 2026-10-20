@@ -14,7 +14,10 @@ object VisionPrompt {
         if (want.isEmpty()) return -1
         val exact = messages.indexOfLast { it.role == PromptMessage.USER && it.content.trim() == want }
         if (exact >= 0) return exact
-        return messages.indexOfLast { it.role == PromptMessage.USER && it.content.trimEnd().endsWith(want) }
+        val tail = messages.indexOfLast { it.role == PromptMessage.USER && it.content.trimEnd().endsWith(want) }
+        if (tail >= 0) return tail
+        // 2.1.6: 智能体 mode appends the plan note after the user's words (AgentPrompt.withPlanNote).
+        return messages.indexOfLast { it.role == PromptMessage.USER && it.content.contains(want) }
     }
 
     /** Long side of the picture copy for an engine that asked for [engineMax] (0 = default). */

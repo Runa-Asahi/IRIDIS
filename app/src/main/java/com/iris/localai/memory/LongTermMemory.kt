@@ -132,7 +132,8 @@ class MemoryDocs(private val dir: File, val cap: Int = MemoryOps.CAP) {
 
 /** How the snapshot enters the system prompt. Pure. */
 object MemoryPrompt {
-    const val HEADER = "【长期记忆】（来自之前的对话，可能已过时；与用户当前说法冲突时以用户为准）"
+    /** 2.3: shorter (was 35 estimated tokens); same meaning. */
+    const val HEADER = "【长期记忆】（可能过时，以用户当前说法为准）"
 
     fun snapshot(user: String, memory: String): String = buildString {
         if (user.isNotBlank()) append("USER.md:\n").append(user.trim())

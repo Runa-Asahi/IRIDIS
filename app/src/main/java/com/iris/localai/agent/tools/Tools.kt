@@ -13,12 +13,12 @@ import java.util.Locale
  * instead of repeating the same advice in every tool line (keeps the prompt small as tools grow).
  */
 enum class ToolGroup(val title: String, val label: String, val hint: String) {
-    FILES("Files", "文件", "paths relative to the workspace; read_file before edit_file"),
-    WEB("Web", "联网", "you are online: search for news, weather, anything recent; never say you have no internet"),
+    FILES("Files", "文件", "workspace-relative paths; read before edit"),
+    WEB("Web", "联网", "you are online; never say you have no internet"),
     SHELL("Terminal", "终端", ""),
-    PHONE("Phone", "手机", "the user confirms each action"),
-    TASKS("Tasks", "定时", "times are the phone's local time"),
-    MEMORY("Memory", "记忆", "older turns may be compacted: use recall for details; memory keeps lasting facts"),
+    PHONE("Phone", "手机", "user confirms each action"),
+    TASKS("Tasks", "定时", ""),
+    MEMORY("Memory", "记忆", "use recall for older turns"),
     SKILLS("Skills", "技能", ""),
     OTHER("Other", "其他", ""),
 }
@@ -161,7 +161,7 @@ object ReadFileTool : AgentTool {
     override val name = "read_file"
     override val label = "读取文件"
     override val description = "读取工作区里的文本文件"
-    override val promptLine = "read_file(path, offset?, limit?): text file lines (limit 200)"
+    override val promptLine = "read_file(path, offset?, limit?): ≤200 lines"
     override val risk = ToolRisk.READ
 
     override fun run(args: JsonObject, env: ToolEnv): ToolResult {
@@ -205,7 +205,7 @@ object WriteFileTool : AgentTool {
     override val name = "write_file"
     override val label = "写入文件"
     override val description = "新建或整体覆盖文件（覆盖前自动备份，可撤销）"
-    override val promptLine = "write_file(path, content, append?): create, overwrite or append"
+    override val promptLine = "write_file(path, content, append?)"
     override val risk = ToolRisk.WRITE
 
     override fun run(args: JsonObject, env: ToolEnv): ToolResult {
@@ -393,7 +393,7 @@ object MoveFileTool : AgentTool {
     override val name = "move_file"
     override val label = "移动/重命名"
     override val description = "在工作区内移动或重命名文件（可撤销）"
-    override val promptLine = "move_file(from, to): move or rename"
+    override val promptLine = "move_file(from, to)"
     override val risk = ToolRisk.WRITE
 
     override fun run(args: JsonObject, env: ToolEnv): ToolResult {
@@ -452,7 +452,7 @@ object CalculatorTool : AgentTool {
     override val name = "calculator"
     override val label = "计算器"
     override val description = "精确计算数学表达式（安全解析，不执行代码）"
-    override val promptLine = "calculator(expression): exact math, e.g. \"(3+4)*2^3\""
+    override val promptLine = "calculator(expression): exact math"
     override val risk = ToolRisk.SAFE
 
     override fun run(args: JsonObject, env: ToolEnv): ToolResult {
@@ -488,7 +488,7 @@ object WebFetchTool : AgentTool {
     override val name = "web_fetch"
     override val label = "网页读取"
     override val description = "联网读取一个网页的文字（和联网搜索一起默认开启，每次询问）"
-    override val promptLine = "web_fetch(url): read a page found by web_search (+images)"
+    override val promptLine = "web_fetch(url): read a page (+images)"
     override val risk = ToolRisk.NETWORK
     // 1.12.0: on by default with web_search (Claude Code / OpenCode pair search with fetch): a
     // search hit the model could not open was a dead end. Still asks (a URL can carry data out).

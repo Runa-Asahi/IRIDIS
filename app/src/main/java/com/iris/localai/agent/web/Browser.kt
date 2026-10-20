@@ -27,7 +27,7 @@ object BrowserTool : AgentTool {
     override val name = "browser"
     override val label = "浏览器"
     override val description = "在内置浏览器里打开网页、点击、输入（支持 JavaScript 和登录；默认关闭，开启后每次询问）"
-    override val promptLine = "browser(action=open|read|click|type|back, url?, id?, text?): web page with login/clicks; url may be keywords"
+    override val promptLine = "browser(action: open|read|click|type|back, url?, id?, text?): login/click pages; url may be keywords"
     override val risk = ToolRisk.NETWORK
     override val defaultEnabled = false
 

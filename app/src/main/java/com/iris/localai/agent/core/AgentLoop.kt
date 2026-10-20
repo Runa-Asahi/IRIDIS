@@ -31,7 +31,7 @@ data class AgentStep(
 )
 
 /**
- * The system prompt for 智能体 mode: compact (well under 800 estimated tokens with every tool on),
+ * The system prompt for 智能体 mode: compact (2.3: ≤ 600 estimated tokens with every tool on),
  * and only the enabled tools are listed. English for token economy; the model answers in Chinese.
  */
 object AgentPrompt {
@@ -49,10 +49,17 @@ object AgentPrompt {
     private val QWEN_HINTS = listOf("qwen", "agents-a1", "agents_a1", "hermes", "qwq", "minicpm4", "internlm3")
 
     /**
-     * 1.10.12: system prompt restructured after Claude Code's layout: who you are → how to talk →
-     * how to do a task → how to call tools (exact format + one example) → tools → environment.
-     * Short imperative lines, one rule each; small on-device models follow these far better than
-     * one long paragraph. Kept small: every token here is prefilled on the phone.
+     * 1.10.12: system prompt laid out after Claude Code's: who you are → rules → how to call tools
+     * (one concrete example) → tools → environment. Short imperative lines, one rule each.
+     *
+     * 2.3 (预填充提速): ordered for KV-cache prefix reuse — everything that never changes within a
+     * conversation comes first and is byte-identical between turns (persona, rules, call format,
+     * the enabled tools in a fixed order), then the semi-stable parts (skills, plan-mode switch,
+     * the user's own instructions, the frozen long-term memory). Nothing volatile lives here: the
+     * conversation's plan rides on the newest user turn ([planNote]) and compaction summaries lead
+     * the history (ContextAssembly / ContextPlanner), so a plan update or a compaction no longer
+     * invalidates the cached system prompt. Wording trimmed (2.3: ~780 → ~570 estimated tokens with
+     * every tool on). Every token here is prefilled on the phone.
      */
     fun build(
         tools: List<AgentTool>, userSystem: String = "", style: CallStyle = CallStyle.FENCE,
@@ -60,45 +67,50 @@ object AgentPrompt {
         skills: List<SkillInfo> = emptyList(),
         /** 1.14.0 按需载入: [ActivateTool.LAZY] groups are listed by name only. */
         lazy: Boolean = false,
-        /** 1.14.0: the conversation's plan (kept here so compaction never drops it). */
-        plan: Plan? = null,
         /** 1.14.0 计划模式: plan first, wait for the user's OK, then do it. */
         planFirst: Boolean = false,
+        /** 2.3: the frozen long-term-memory block (last: semi-stable, after the user's instructions). */
+        memory: String = "",
     ): String = buildString {
-        append("You are IRIS, an AI agent on the user's Android phone (on-device model), helping with everyday tasks and workspace files.\n\n")
+        // 2.3: fixed tool order whatever the caller passes (byte-identical prefix for the KV cache).
+        val tools = tools.distinct().sortedBy { t -> TOOL_ORDER.indexOf(t.name).let { if (it < 0) Int.MAX_VALUE else it } }
+        append("You are IRIS, an AI agent on the user's Android phone.\n\n")
 
-        append("# Tone\n")
-        append("- Reply in Chinese, concise, answer first.\n")
-        append("- Never claim you did something you did not do.\n\n")
-
-        append("# Doing tasks\n")
+        append("# Rules\n")
+        append("- Reply in Chinese, concise. Never claim actions you did not take.\n")
         append("- Chat or simple questions: plain text with NO tool block (\"system\" is not a tool).\n")
-        append("- Use a tool only when the task needs it; one step at a time.\n")
-        append("- When done, answer briefly with what you did. If a tool fails, fix it once or report the error.\n\n")
+        append("- Use tools only when needed; if one fails, fix it once or report it.\n\n")
 
         append("# Tool calls\n")
+        append("Call a tool with ONLY this, then stop and wait:\n")
         if (style == CallStyle.QWEN) {
-            append("To call a tool, reply with ONLY this, then stop and wait:\n")
-            append("<tool_call>\n{\"name\": \"<tool>\", \"arguments\": {<args as JSON>}}\n</tool_call>\n")
-            append("Example:\n<tool_call>\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"notes/todo.md\"}}\n</tool_call>\n")
+            append("<tool_call>\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"notes/todo.md\"}}\n</tool_call>\n")
         } else {
-            append("To call a tool, reply with ONLY this block, then stop and wait:\n")
-            append("```tool\n{\"tool\": \"<name>\", \"args\": {<arguments>}}\n```\n")
-            append("Example:\n```tool\n{\"tool\": \"read_file\", \"args\": {\"path\": \"notes/todo.md\"}}\n```\n")
+            append("```tool\n{\"tool\": \"read_file\", \"args\": {\"path\": \"notes/todo.md\"}}\n```\n")
         }
-        append("- One call per reply, valid JSON. Results come back in <tool_response>; never write one yourself.\n")
-        append("- Only the exact tool names below. Asked what tools you have? List them in words.\n\n")
+        append("- One call per reply, valid JSON. Results come in <tool_response>; never write one.\n")
+        append("- Use only the names below; asked about your tools, answer in words.\n\n")
 
         if (tools.isNotEmpty()) {
-            // 1.12.0: grouped, one shared hint per group.
-            append("# Tools (? = optional)\n")
+            // 1.12.0: grouped, one shared hint per group. Group order and tool order are fixed
+            // (enum order, then [AgentTools.all] order), so the text is identical turn after turn.
+            // 2.3: the time format once in the header (phone + schedule; also for activate'd groups).
+            append("# Tools (? = optional")
+            if (tools.any { it.promptLine.contains("time?") }) append("; time = ").append(TIME_FORMAT).append(", local")
+            append(")\n")
             val activatable = lazy && tools.any { it.name == ActivateTool.name }
             val folded = if (activatable) tools.filter { it.group in ActivateTool.LAZY } else emptyList()
-            tools.filter { it !in folded && (it.name != ActivateTool.name || folded.isNotEmpty()) }.groupBy { it.group }.toSortedMap(compareBy { it.ordinal }).forEach { (g, ts) ->
-                append("## ").append(g.title)
-                if (g.hint.isNotEmpty()) append(" — ").append(g.hint)
-                append('\n')
-                ts.forEach { append("- ").append(it.promptLine).append('\n') }
+            val shown = tools.filter { it !in folded && (it.name != ActivateTool.name || folded.isNotEmpty()) }
+            // Groups with a shared hint get a header; 2.3: the rest are listed together under "Other",
+            // one tool per line without bullets (fewer tokens, same information).
+            val (hinted, plain) = shown.partition { it.group.hint.isNotEmpty() }
+            hinted.groupBy { it.group }.toSortedMap(compareBy { it.ordinal }).forEach { (g, ts) ->
+                append("## ").append(g.title).append(" — ").append(g.hint).append('\n')
+                ts.forEach { append(it.promptLine).append('\n') }
+            }
+            if (plain.isNotEmpty()) {
+                append("## ").append(ToolGroup.OTHER.title).append('\n')
+                plain.sortedBy { it.group.ordinal }.forEach { append(it.promptLine).append('\n') }
             }
             if (folded.isNotEmpty()) {
                 append("## More (call activate(group) first)\n")
@@ -108,7 +120,7 @@ object AgentPrompt {
             }
             if (skills.isNotEmpty() && tools.any { it.name == SkillTool.name }) {
                 append("\n# Skills (load with skill(name) when the task matches)\n")
-                skills.take(MAX_SKILLS_LISTED).forEach { append("- ").append(it.name).append(": ").append(it.description.take(120)).append('\n') }
+                skills.take(MAX_SKILLS_LISTED).forEach { append("- ").append(it.name).append(": ").append(it.description.take(SKILL_DESC_MAX)).append('\n') }
             }
         } else {
             append("# Tools\nNo tools are enabled; answer in plain text.\n")
@@ -116,11 +128,31 @@ object AgentPrompt {
         if (planFirst && tools.any { it.name == PlanTool.name }) {
             append("\n# Plan mode\n- For a task with several steps: first call plan(action: set, steps: [...]), then show the plan in one short reply and ask the user to confirm. Start only after the user agrees.\n")
         }
-        if (plan != null && plan.steps.isNotEmpty() && !plan.finished) append('\n').append(plan.promptBlock()).append('\n')
         if (userSystem.isNotBlank()) append("\n# User instructions\n").append(userSystem.trim()).append('\n')
+        if (memory.isNotBlank()) append('\n').append(memory.trim()).append('\n')
     }.trimEnd()
 
+    /**
+     * 2.3: the conversation's unfinished plan, added to the newest user turn of an agent run (it
+     * used to sit in the system prompt, where every plan update forced a full re-prefill). It is
+     * re-added on every run, so compaction can still never drop it.
+     */
+    fun planNote(plan: Plan?): String? =
+        plan?.takeIf { it.steps.isNotEmpty() && !it.finished }?.promptBlock()
+
+    /** 2.3: [planNote] appended to the last user message of [messages] (prompt only). */
+    fun withPlanNote(messages: List<PromptMessage>, plan: Plan?): List<PromptMessage> {
+        val note = planNote(plan) ?: return messages
+        val i = messages.indexOfLast { it.role == PromptMessage.USER }
+        if (i < 0) return messages
+        return messages.mapIndexed { idx, m -> if (idx == i) m.copy(content = m.content.trimEnd() + "\n\n" + note) else m }
+    }
+
     const val MAX_SKILLS_LISTED = 12
+    const val SKILL_DESC_MAX = 100
+    /** 2.3: how phone / schedule take a time (stated once in the tools header). */
+    const val TIME_FORMAT = "\"[yyyy-MM-dd ]HH:mm\""
+    private val TOOL_ORDER: List<String> by lazy { (AgentTools.all + AgentTools.onDemand).map { it.name } }
 
     fun toolResponse(name: String, r: ToolResult): String =
         "<tool_response>\n{\"tool\": \"$name\", \"ok\": ${r.ok}}\n${r.output}\n</tool_response>"

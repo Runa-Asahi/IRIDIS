@@ -13,12 +13,6 @@ class V215EdgeToEdgeTest {
     private fun source(path: String): String =
         listOf(path, "app/$path").map { java.io.File(it) }.first { it.exists() }.readText()
 
-    @Test fun version() {
-        val gradle = listOf("app/build.gradle.kts", "build.gradle.kts").map { java.io.File(it) }.first { it.exists() }.readText()
-        assertTrue(gradle.contains("versionCode = 183"))
-        assertTrue(gradle.contains("versionName = \"2.1.5\""))
-    }
-
     @Test fun topBarOpaqueWithoutBackground() {
         val page = Color(0xFFFFFFFF)
         assertEquals(page, chatTopBarColor(page, backgroundImage = false))

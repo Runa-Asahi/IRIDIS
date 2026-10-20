@@ -40,7 +40,7 @@ object PhoneTool : AgentTool {
     override val name = "phone"
     override val label = "手机操作"
     override val description = "设闹钟、计时器、加日历、打开 App、分享、剪贴板、打开网页、拨号（每次询问）"
-    override val promptLine = "phone(action: alarm|timer|calendar|open_app|share|copy|paste|open_url|dial, time?: \"[yyyy-MM-dd ]HH:mm\", end?, seconds?, text?, name?, url?, number?)"
+    override val promptLine = "phone(action: alarm|timer|calendar|open_app|share|copy|paste|open_url|dial, time?, end?, seconds?, text?, name?, url?, number?)"
     override val risk = ToolRisk.WRITE
     override val group = ToolGroup.PHONE
 
