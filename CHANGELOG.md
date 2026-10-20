@@ -2,7 +2,15 @@
 
 发布版本记录见 [GitHub Releases](https://github.com/WWRJ3321/IRIDIS/releases)。本文件从开源首个版本开始记录。
 
-## 未发布
+## 2.1.1（2026-10-20）
+
+### NPU（LiteRT-LM）
+- 高通 NPU 运行库补装 `libQnnHtpPrepare.so`（Google LiteRT-LM NPU 指南要求），2.1.0 装的旧运行库会提示「需要修复」。
+- NPU 初始化失败时，报错里直接附 QNN / FastRPC 原生日志尾部。
+
+### GenieX 引擎（full）
+- 接入高通 GenieX 0.8.0：GGUF 可选 NPU / GPU / CPU，支持 AI Hub QAIRT 预编译包与 mmproj 视觉。
+- 原生运行库按需下载（设置 › 模型与后端 › GenieX，同意高通许可后下载，约 50 MB），APK 不变大。
 
 ### 目录布局
 `Download/IRIDIS` 改为 App 资源/配置根目录，只有其中的 `workspace/` 是智能体工作区：
