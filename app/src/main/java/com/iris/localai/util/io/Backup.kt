@@ -24,7 +24,10 @@ object Backup {
     const val FORMAT = "iridis-backup"
     /** 1 = 1.12.0 – 2.0.0 (marker only); 2 = 2.1.0 (manifest, skills, API key optional). */
     const val FORMAT_VERSION = 2
-    /** Zip prefix of the workspace skills (restored into the current workspace's skills folder). */
+    /**
+     * Zip prefix of the user skills (restored into the current skills folder). The name is kept for
+     * compatibility with 2.1.0 zips; since 2.1.1 the skills live in Download/IRIDIS/skills, not the workspace.
+     */
     const val SKILLS_PREFIX = "workspace/skills/"
     /** Paths relative to the app's data dir (filesDir's parent). */
     val ITEMS = listOf(
@@ -73,7 +76,8 @@ object Backup {
 
     /**
      * Writes the zip; returns how many data files went in (marker and manifest not counted).
-     * [workspace] = the agent workspace root, whose `skills` folder is included when present.
+     * [workspace] = the folder whose `skills` subfolder is included when present (2.1.1: the app's resource
+     * root Download/IRIDIS, not the agent sandbox).
      */
     fun export(
         root: File, out: OutputStream, version: String,
@@ -129,7 +133,7 @@ object Backup {
 
     /**
      * Restores a zip made by [export] (or by 1.12.0 – 2.0.0); only the listed paths are written.
-     * Skills go into [workspace]`/skills` (merged, same-named files replaced) when given.
+     * Skills go into [workspace]`/skills` (merged, same-named files replaced) when given (2.1.1: Download/IRIDIS).
      * Returns the file count.
      */
     fun restore(root: File, input: InputStream, workspace: File? = null): Int {

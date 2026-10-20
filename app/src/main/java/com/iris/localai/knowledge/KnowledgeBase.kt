@@ -5,7 +5,8 @@ import kotlinx.serialization.json.Json
 import java.io.File
 
 /**
- * 2.1.0 知识库: `knowledge/` in the agent workspace (Download/IRIDIS/knowledge). The index is a
+ * 2.1.0 知识库: `knowledge/` in the app's resource root (2.1.1: Download/IRIDIS/knowledge, beside — not inside —
+ * the agent workspace, so only kb_search reads it; filesDir/iridis/knowledge in 应用私有目录 mode). The index is a
  * JSON file in app storage ([indexFile]); it is brought up to date on demand (before a search, or
  * from 重建索引) by comparing each file's size and mtime. Files only visible through the SAF grant
  * ([external]) are read that way (no mtime: changes are noticed by size, or by 重建索引).

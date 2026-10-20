@@ -31,16 +31,22 @@ object ModelDirs {
         val listDirs: List<File> get() = listOfNotNull(sharedDir, privateDir).distinctBy { it.absolutePath }
     }
 
-    fun sharedDir(downloadsDir: File): File = File(File(downloadsDir, WorkspaceResolver.FOLDER), SUB)
+    /** `Download/IRIDIS/<sub>` ([SUB] = models; 2.1.1 voice packs use `voice`). */
+    fun sharedDir(downloadsDir: File, sub: String = SUB): File = File(File(downloadsDir, WorkspaceResolver.FOLDER), sub)
 
+    /**
+     * Shared `Download/IRIDIS/<sub>` with 全部文件访问 (mounted and writable), else [privateDir].
+     * 2.1.1: also used for the voice packs ([sub] = `voice`), with the same fallback.
+     */
     fun resolve(
         allFilesAccess: Boolean,
         storageState: String?,
         downloadsDir: File?,
         privateDir: File,
         usable: (File) -> Boolean = WorkspaceResolver::probe,
+        sub: String = SUB,
     ): Location {
-        val shared = downloadsDir?.let { sharedDir(it) }
+        val shared = downloadsDir?.let { sharedDir(it, sub) }
         val ok = allFilesAccess && storageState == WorkspaceResolver.MOUNTED && shared != null && usable(shared)
         if (ok) ensureNoMedia(shared!!)
         return Location(if (ok) shared!! else privateDir, ok, shared, privateDir)

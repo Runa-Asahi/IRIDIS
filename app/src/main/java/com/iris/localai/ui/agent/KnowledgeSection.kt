@@ -40,7 +40,8 @@ object KnowledgeText {
     fun status(files: Int, chunks: Int, unsupported: Int): String =
         if (files == 0) "还没有文件" else "$files 个文件 · $chunks 段" + if (unsupported > 0) " · $unsupported 个不支持" else ""
 
-    fun folder(workspace: String): String = "用文件管理器把文件放进：$workspace/${KnowledgeBase.FOLDER}"
+    /** [appRoot] = Download/IRIDIS (2.1.1: the 知识库 is an app resource beside workspace/, not inside it). */
+    fun folder(appRoot: String): String = "用文件管理器把文件放进：$appRoot/${KnowledgeBase.FOLDER}"
 }
 
 /** 2.1.0 知识库: status, 重建索引, 添加文件 (copied into knowledge/), the folder, and 引用知识库. */
@@ -83,7 +84,7 @@ fun KnowledgeSection() {
     SettingsGroup {
         SettingsRow(
             "文件夹", icon = IrisIcons.Folder,
-            subtitle = (status?.let { KnowledgeText.status(it.files, it.chunks, it.unsupported) } ?: "正在读取…") + "\n" + KnowledgeText.folder(ws.root.path),
+            subtitle = (status?.let { KnowledgeText.status(it.files, it.chunks, it.unsupported) } ?: "正在读取…") + "\n" + KnowledgeText.folder(ws.appRoot.path),
             subtitleMaxLines = 4,
         )
         Divider()

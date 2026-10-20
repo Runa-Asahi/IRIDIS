@@ -41,6 +41,7 @@ object StorageUsage {
         const val VOICE_OTHER = "voice:other"
         const val WS_FILES = "ws:files"
         const val WS_SKILLS = "ws:skills"
+        const val WS_KNOWLEDGE = "ws:knowledge"
         const val WS_PRIVATE = "ws:private"
         const val WS_UNDO = "ws:undo"
         const val WS_MEMORY = "ws:memory"
@@ -113,6 +114,10 @@ object StorageUsage {
         val restoreStage: File,
         /** 2.1.0: `Download/IRIDIS/models` (outside the app's storage: listed, not in the total); null = not used. */
         val sharedModelsDir: File? = null,
+        /** 2.1.1: user skills — `Download/IRIDIS/skills` beside the workspace (inside it before). */
+        val skillsDir: File = File(workspace, SKILLS_DIR),
+        /** 2.1.1: 知识库 files (`Download/IRIDIS/knowledge`); null = not listed. */
+        val knowledgeDir: File? = null,
         /** Children of [cacheDir] that belong to other categories or are live (never cleared as 「缓存」). */
         val cacheKeep: Set<String> = CACHE_KEEP,
     )
@@ -120,7 +125,7 @@ object StorageUsage {
     /** cacheDir/mnn and cacheDir/opencl are model caches; npu-dl is a running NPU download; WebView is the browser's own. */
     val CACHE_KEEP = setOf("mnn", "opencl", "npu-dl", "WebView")
 
-    /** Skills live in `<workspace>/skills` (SkillCatalog.DIR). */
+    /** Skills folder name (SkillCatalog.DIR); 2.1.1: under Download/IRIDIS, no longer in the workspace. */
     const val SKILLS_DIR = "skills"
 
     /** Attachments younger than this may belong to a message still being written in the composer. */
@@ -237,31 +242,37 @@ object StorageUsage {
 
         // 语音模型 — each downloaded pack (complete or partial), cloned voices, anything else in the voice dir.
         run {
-            val list = voices.mapNotNull { v -> val u = usage(v.dir); if (u.files > 0) Entry(Ids.VOICE_PREFIX + v.id, v.label, u.bytes, u.files) else null }
+            // 2.1.1: a pack may be in Download/IRIDIS/voice (outside the app's storage: listed, not in the total).
+            val list = voices.mapNotNull { v -> val u = usage(v.dir); if (u.files > 0) Entry(Ids.VOICE_PREFIX + v.id, v.label, u.bytes, u.files, external = outside(v.dir)) else null }
             val clones = usage(p.voiceClones)
             val cloneCount = p.voiceClones.listFiles().orEmpty().count { it.isDirectory }
-            val other = (sizeOf(p.voiceRoot) - list.sumOf { it.bytes } -
+            val inRoot = voices.filter { isUnder(it.dir, p.voiceRoot) }.sumOf { sizeOf(it.dir) }
+            val other = (sizeOf(p.voiceRoot) - inRoot -
                 (if (isUnder(p.voiceClones, p.voiceRoot)) clones.bytes else 0L)).coerceAtLeast(0)
             groups += Group(Category.VOICE, list.sortedByDescending { it.bytes } + listOfNotNull(
                 Entry(Ids.VOICE_CLONES, "克隆的音色", clones.bytes, clones.files, count = cloneCount).takeIf { clones.files > 0 },
-                Entry(Ids.VOICE_OTHER, "其他语音文件", other).takeIf { other > 0 },
+                Entry(Ids.VOICE_OTHER, "其他语音文件", other, external = outside(p.voiceRoot)).takeIf { other > 0 },
             ))
         }
 
         // 技能 / 工作区 — workspace (skills separately), the old private workspace, undo history, long-term memory.
         run {
-            val skillsDir = File(p.workspace, SKILLS_DIR)
+            val skillsDir = p.skillsDir
             val skills = usage(skillsDir)
             val skillCount = skillsDir.listFiles().orEmpty().count { it.isDirectory }
-            val ws = usageExcept(p.workspace, setOf(SKILLS_DIR))
+            // Skills inside the workspace (pre-2.1.1 layout, or a test) are not counted twice.
+            val ws = if (canon(skillsDir.parentFile ?: skillsDir) == canon(p.workspace)) usageExcept(p.workspace, setOf(SKILLS_DIR)) else usage(p.workspace)
             val ext = outside(p.workspace)
+            val kb = p.knowledgeDir?.takeIf { !isUnder(it, p.workspace) }
+            val kbUsage = usage(kb)
             val samePrivate = canon(p.privateWorkspace) == canon(p.workspace)
             val priv = if (samePrivate) Usage.ZERO else usage(p.privateWorkspace)
             val undo = usage(p.undo)
             val mem = usage(p.memory)
             groups += Group(Category.WORKSPACE, listOfNotNull(
                 Entry(Ids.WS_FILES, "工作区文件", ws.bytes, ws.files, external = ext),
-                Entry(Ids.WS_SKILLS, "技能", skills.bytes, skills.files, count = skillCount, external = ext).takeIf { skills.files > 0 },
+                Entry(Ids.WS_SKILLS, "技能", skills.bytes, skills.files, count = skillCount, external = outside(skillsDir)).takeIf { skills.files > 0 },
+                kb?.let { Entry(Ids.WS_KNOWLEDGE, "知识库", kbUsage.bytes, kbUsage.files, count = kbUsage.files, external = outside(it)) }?.takeIf { kbUsage.files > 0 },
                 Entry(Ids.WS_PRIVATE, "应用私有目录中的旧工作区", priv.bytes, priv.files).takeIf { priv.files > 0 },
                 Entry(Ids.WS_UNDO, "撤销记录", undo.bytes, undo.files).takeIf { undo.files > 0 },
                 Entry(Ids.WS_MEMORY, "长期记忆", mem.bytes, mem.files).takeIf { mem.files > 0 },

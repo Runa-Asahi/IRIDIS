@@ -20,7 +20,7 @@ IRIDIS/
 │   │       │   ├── tools/          工具注册表与分组 + 文件 / 计算器 / 记忆 / 手机 / 定时 / 技能
 │   │       │   ├── shell/          run_command 与三个后端：内置 sh、Alpine（PRoot）、Termux
 │   │       │   ├── web/            联网搜索（必应 / DuckDuckGo / SearXNG）、网页读取、WebView 浏览器
-│   │       │   └── workspace/      工作区沙箱、撤销、SAF、位置
+│   │       │   └── workspace/      工作区沙箱、撤销、SAF、位置、Download/IRIDIS 目录布局与迁移（StorageLayout）
 │   │       ├── context/            零模型压缩、上下文拼装
 │   │       ├── memory/             USER.md / MEMORY.md、FTS 历史索引
 │   │       ├── voice/              本地语音（sherpa-onnx：识别、VAD、合成、克隆）

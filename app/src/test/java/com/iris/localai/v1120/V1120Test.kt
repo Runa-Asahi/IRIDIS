@@ -166,7 +166,8 @@ class V1120Test {
         assertEquals(listOf("daily-news", "my-skill"), all.map { it.name })
         assertEquals("Do X", all.last().description)
         val r = SkillTool.run(buildJsonObject { put("name", "my-skill") }, env(skills = cat))
-        assertTrue(r.output.contains("1. go") && r.output.contains("skills/my-skill/run.sh") && !r.output.contains("description:"))
+        // 2.1.1: skill files are listed relative to the skill and read through the tool (skills are outside the workspace).
+        assertTrue(r.output.contains("1. go") && r.output.contains("run.sh") && !r.output.contains("description:"))
         assertFalse(SkillTool.run(buildJsonObject { put("name", "zzz") }, env(skills = cat)).ok)
         assertEquals("x" to "y", SkillCatalog.frontMatter("---\nname: x\n---\ny").let { it.first["name"] to it.second.trim() })
     }

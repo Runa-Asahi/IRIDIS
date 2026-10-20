@@ -117,9 +117,11 @@ class StorageViewModel(app: Application) : AndroidViewModel(app) {
             mnnCache = File(ctx.cacheDir, "mnn"),
             openclCache = File(ctx.cacheDir, "opencl"),           // IrisApp: GGML_OPENCL_KERNEL_CACHE_DIR
             npuRuntime = File(files, "npu"),                      // QualcommNpuRuntime.dir (full)
-            voiceRoot = c.voiceStore.root,
+            voiceRoot = c.voiceStore.root,                        // 2.1.1: Download/IRIDIS/voice with 全部文件访问
             voiceClones = File(files, "voice-clones"),            // CloneVoiceStore.root
-            workspace = c.agent.workspace.value.root,
+            workspace = c.agent.workspace.value.root,             // 2.1.1: Download/IRIDIS/workspace
+            skillsDir = File(c.agent.appRoot, com.iris.localai.agent.StorageLayout.SKILLS),
+            knowledgeDir = File(c.agent.appRoot, com.iris.localai.agent.StorageLayout.KNOWLEDGE),
             privateWorkspace = c.agent.privateRoot,
             undo = File(files, "agent-undo"),                     // AgentContainer.undo
             memory = File(files, "memory"),                       // AgentContainer.memoryDocs
@@ -402,7 +404,7 @@ fun StoragePage(
                             e.label, subtitle = "${e.count ?: 0} 个音色 · ${Format.bytes(e.bytes)}",
                             onClick = { onOpen(SettingsPage.VOICE) }, trailing = { Chevron() },
                         )
-                        Ids.VOICE_OTHER -> SettingsRow(e.label, subtitle = sizeLine(e))
+                        Ids.VOICE_OTHER -> SettingsRow(e.label, subtitle = sizeLine(e) + if (e.external) " · " + StorageLayoutText.VOICE_SHARED else "")
                         else -> {
                             val pack = VoicePack.byId(e.id.removePrefix(Ids.VOICE_PREFIX))
                             val st = pack?.let { voiceStates[it] }
@@ -419,7 +421,7 @@ fun StoragePage(
                                 else -> "未下载完成"
                             }
                             SettingsRow(
-                                e.label, subtitle = listOfNotNull(Format.bytes(e.bytes), kind, state).joinToString(" · "),
+                                e.label, subtitle = listOfNotNull(Format.bytes(e.bytes), kind, state, StorageLayoutText.VOICE_SHARED.takeIf { e.external }).joinToString(" · "),
                                 trailing = {
                                     IrisButton(
                                         "删除", { pack?.let { pending = StoragePending.Voice(it) } },
@@ -439,12 +441,16 @@ fun StoragePage(
                     if (i > 0) Divider()
                     when (e.id) {
                         Ids.WS_FILES -> SettingsRow(
-                            e.label, subtitle = sizeLine(e) + if (e.external) " · 在 Download/IRISLocalAI，不计入应用占用" else "",
+                            e.label, subtitle = sizeLine(e) + if (e.external) " · " + StorageLayoutText.WORKSPACE_SHARED else "",
                             subtitleMaxLines = 2, onClick = onOpenFiles, trailing = { Chevron() },
                         )
                         Ids.WS_SKILLS -> SettingsRow(
-                            e.label, subtitle = "${e.count ?: 0} 个技能 · ${Format.bytes(e.bytes)}",
-                            onClick = onOpenFiles, trailing = { Chevron() },
+                            e.label, subtitle = "${e.count ?: 0} 个技能 · ${Format.bytes(e.bytes)}" + if (e.external) " · " + StorageLayoutText.SKILLS_SHARED else "",
+                            subtitleMaxLines = 2,
+                        )
+                        Ids.WS_KNOWLEDGE -> SettingsRow(
+                            e.label, subtitle = "${e.count ?: 0} 个文件 · ${Format.bytes(e.bytes)}" + if (e.external) " · " + StorageLayoutText.KNOWLEDGE_SHARED else "",
+                            subtitleMaxLines = 2,
                         )
                         Ids.WS_UNDO -> ActionRow(e, "清除", detail = "智能体改文件前保存的旧版本") { pending = StoragePending.Undo }
                         Ids.WS_MEMORY -> SettingsRow(e.label, subtitle = sizeLine(e), onClick = { onOpen(SettingsPage.MEMORY) }, trailing = { Chevron() })
@@ -453,6 +459,7 @@ fun StoragePage(
                 }
             }
             GroupFootnote("工作区文件不提供一键清空，请在「文件」中管理。")
+            GroupFootnote(StorageLayoutText.SUMMARY)
 
             // ---- 终端环境 ----
             CategorySection(Category.TERMINAL, r) { g ->
@@ -772,7 +779,7 @@ private fun ColumnScope.ModelsFolderRows(folder: StorageViewModel.ModelsFolder?,
         Divider()
         SettingsRow(
             ModelFolderText.GRANT_TITLE, icon = com.iris.localai.ui.icons.IrisIcons.Folder,
-            subtitle = ModelFolderText.GRANT_HINT, subtitleMaxLines = 2,
+            subtitle = ModelFolderText.GRANT_HINT, subtitleMaxLines = 3,
             onClick = { com.iris.localai.ui.models.openAllFilesAccess(context) }, trailing = { Chevron() },
         )
     } else if (move?.active == true) {
@@ -794,9 +801,19 @@ private fun ColumnScope.ModelsFolderRows(folder: StorageViewModel.ModelsFolder?,
     }
 }
 
+/** 2.1.1: Download/IRIDIS is the app's resource root; only workspace/ belongs to the agent. */
+object StorageLayoutText {
+    private val L = com.iris.localai.agent.StorageLayout
+    val SUMMARY = L.SUMMARY + "。智能体只能访问 ${L.WORKSPACE}。"
+    val WORKSPACE_SHARED = "在 ${L.label(L.WORKSPACE)}，不计入应用占用"
+    val SKILLS_SHARED = "在 ${L.label(L.SKILLS)}，不计入应用占用"
+    val KNOWLEDGE_SHARED = "在 ${L.label(L.KNOWLEDGE)}，不计入应用占用"
+    val VOICE_SHARED = "在 ${L.label(L.VOICE)}"
+}
+
 object ModelFolderText {
     const val MOVE = "把模型移到 下载/IRIDIS/models"
     const val MOVING = "正在移动模型…"
     const val GRANT_TITLE = "开启全部文件访问以保存模型到公共目录"
-    const val GRANT_HINT = "未开启 · 模型保存在应用目录，卸载后会被删除；开启后存到 下载/IRIDIS/models"
+    const val GRANT_HINT = "未开启 · 模型和语音模型保存在应用目录，卸载后会被删除；开启后存到 下载/IRIDIS/models 和 下载/IRIDIS/voice"
 }

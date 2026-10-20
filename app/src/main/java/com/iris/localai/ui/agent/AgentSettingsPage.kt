@@ -80,14 +80,14 @@ object AgentText {
     const val STEPS = "一次回复最多调用几次工具"
     const val PERMISSION_NOTE = "点工具右侧的权限可切换：允许 = 直接执行，询问 = 每次确认，拒绝 = 不执行。"
     const val TOOLS = "工具与权限"
-    const val WORKSPACE_NOTE = "智能体只能访问这个工作区；修改前自动备份，可逐步撤销（最多 20 步）。"
+    const val WORKSPACE_NOTE = "智能体只能访问这个工作区（下载/IRIDIS 里的模型、语音、技能、知识库和备份不在其中）；修改前自动备份，可逐步撤销（最多 20 步）。"
     /** 1.10.0 workspace location texts. */
     const val LOCATION = "工作区位置"
-    const val LOCATION_NOTE = "默认在「下载/IRISLocalAI」，文件管理器可见；切换位置不会搬动已有文件。"
+    const val LOCATION_NOTE = "默认在「下载/IRIDIS/workspace」，文件管理器可见；切换位置不会搬动已有文件。"
     const val SAF = "授权访问这个文件夹（备选）"
-    const val SAF_HINT = "你放进 Download/IRISLocalAI 的文件需授权一次才能读写；已开「全部文件访问」时不需要。"
+    const val SAF_HINT = "授权 Download/IRIDIS 一次，智能体才能读写你放进 workspace 的文件；已开「全部文件访问」时不需要。"
     const val SAF_DONE = "已授权：智能体可以列出、读取和修改你放进去的文件（1.10.5 及更早的授权是只读的，需重新授权一次）"
-    const val SAF_WRONG = "请选择 Download/IRISLocalAI 这个文件夹（选其他文件夹不会生效）"
+    const val SAF_WRONG = "请选择 Download/IRIDIS 这个文件夹（选其他文件夹不会生效；智能体只会访问其中的 workspace）"
     fun path(p: String) = "实际路径：$p"
     val PERMISSION_OPTIONS = listOf(Permission.ALLOW, Permission.ASK, Permission.DENY)
 
@@ -124,6 +124,11 @@ fun AgentSettingsPage(onBack: () -> Unit, onOpenTerminal: () -> Unit = {}, onOpe
         agent.settings.update { it.copy(workspaceTreeUri = uri.toString()) }
         agent.changed()
         message = AgentText.SAF_DONE
+        // 2.1.1: with the grant, files the user had put at the root can be moved into workspace/ now.
+        scope.launch {
+            val r = withContext(Dispatchers.IO) { runCatching { agent.migrateLayout() }.getOrNull() }
+            r?.let { com.iris.localai.agent.StorageLayout.notice(it) }?.let { message = AgentText.SAF_DONE + "\n" + it }
+        }
     }
 
     val files by produceState(emptyList<WsFile>(), revision, ws) {
@@ -217,7 +222,7 @@ fun AgentSettingsPage(onBack: () -> Unit, onOpenTerminal: () -> Unit = {}, onOpe
 
             SectionTitle("工作区")
             SettingsGroup {
-                // 1.10.0: 下载/IRIDIS (default) or 应用私有目录, with the real path.
+                // 1.10.0: 下载/IRIDIS/workspace (2.1.1, default) or 应用私有目录, with the real path.
                 Column(Modifier.fillMaxWidth().padding(bottom = 14.dp)) {
                     SettingsRow(
                         AgentText.LOCATION, icon = com.iris.localai.ui.icons.IrisIcons.Folder,
@@ -243,6 +248,11 @@ fun AgentSettingsPage(onBack: () -> Unit, onOpenTerminal: () -> Unit = {}, onOpe
                                 allFiles = agent.hasAllFilesAccess(); agent.changed()
                                 // 2.1.0: access may have just been granted — the old folder can be moved now.
                                 if (legacyHint != null) scope.launch { withContext(Dispatchers.IO) { runCatching { agent.migrateLegacyFolder() } } }
+                                // 2.1.1: with 全部文件访问 the root's old files are visible — finish the move into workspace/.
+                                if (allFiles) scope.launch {
+                                    val r = withContext(Dispatchers.IO) { runCatching { agent.migrateLayout() }.getOrNull() }
+                                    r?.let { com.iris.localai.agent.StorageLayout.notice(it) }?.let { message = it }
+                                }
                             }
                         }
                         lifecycle.addObserver(obs)

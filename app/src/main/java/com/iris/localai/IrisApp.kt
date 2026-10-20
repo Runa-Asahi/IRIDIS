@@ -107,6 +107,9 @@ class IrisApp : Application() {
                     if (r.ok) "已把旧文件夹 ${com.iris.localai.agent.WorkspaceResolver.LEGACY_FOLDER} 的 ${r.copied + r.skipped} 个文件迁移到 ${container.agent.workspace.value.root.path}"
                     else "旧文件夹迁移未完成：${r.failed} 个文件复制失败，原文件仍保留"
             }
+            // 2.1.1: Download/IRIDIS is the resource root now; its old user files move into workspace/ once.
+            runCatching { container.agent.migrateLayout() }.onFailure { android.util.Log.w("IrisWorkspace", "layout migration failed", it) }.getOrNull()
+                ?.let { r -> com.iris.localai.agent.StorageLayout.notice(r)?.let { container.agent.workspaceNote.value = it } }
         }
         // 1.10.0: the raw history index (recall) follows every save; once, it indexes the saved conversations.
         container.scope.launch(kotlinx.coroutines.Dispatchers.IO) {

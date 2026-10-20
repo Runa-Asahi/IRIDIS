@@ -90,18 +90,35 @@ sealed interface PackState {
 
 /**
  * Downloads voice models file-by-file from a pinned revision (resumable with HTTP Range,
- * verified by size) into app-private storage. A pack is usable only after every file is
- * complete and a marker is written, so a half-finished download is never loaded.
+ * verified by size). A pack is usable only after every file is complete and a marker is
+ * written, so a half-finished download is never loaded.
+ * 2.1.1: like the text models ([com.iris.localai.data.ModelDirs]) new packs go to the public
+ * `Download/IRIDIS/voice` when 全部文件访问 is granted, else to the app-specific `files/voice`;
+ * an installed pack is found in either ([VoiceDirs]).
  */
 class VoiceModelStore(private val context: Context) {
 
     private val json = Json { ignoreUnknownKeys = true }
-    val root: File = File(context.getExternalFilesDir(null) ?: context.filesDir, "voice").apply { mkdirs() }
+    /** App-specific folder (pre-2.1.1 location, and the fallback without 全部文件访问). */
+    val privateRoot: File = File(context.getExternalFilesDir(null) ?: context.filesDir, "voice").apply { mkdirs() }
+
+    /** Re-evaluated on every call, so granting 全部文件访问 later switches new downloads to the shared folder. */
+    fun location(): com.iris.localai.data.ModelDirs.Location = com.iris.localai.data.ModelDirs.resolve(
+        allFilesAccess = runCatching { android.os.Environment.isExternalStorageManager() }.getOrDefault(false),
+        storageState = runCatching { android.os.Environment.getExternalStorageState() }.getOrNull(),
+        downloadsDir = runCatching { android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS) }.getOrNull(),
+        privateDir = privateRoot,
+        sub = com.iris.localai.agent.StorageLayout.VOICE,
+    )
+
+    /** Where new packs are written right now. */
+    val root: File get() = location().dir
 
     private val _states = MutableStateFlow(VoicePack.entries.associateWith { stateOnDisk(it) })
     val states: StateFlow<Map<VoicePack, PackState>> = _states.asStateFlow()
 
-    fun dir(pack: VoicePack) = File(root, pack.id)
+    /** The installed copy of [pack] (shared or private), else where a download of it goes now. */
+    fun dir(pack: VoicePack): File = location().let { VoiceDirs.packDir(it.listDirs, it.dir, pack.id, MARKER) }
     fun isInstalled(pack: VoicePack) = File(dir(pack), MARKER).exists()
 
     /**
@@ -192,7 +209,7 @@ class VoiceModelStore(private val context: Context) {
 
     fun delete(pack: VoicePack) {
         publish(pack, PackState.NotInstalled) // first, so nothing picks the pack while it is being removed
-        dir(pack).deleteRecursively()
+        location().listDirs.forEach { File(it, pack.id).deleteRecursively() }
     }
 
     private fun publish(pack: VoicePack, s: PackState) = _states.update { it + (pack to s) }
@@ -221,4 +238,11 @@ class VoiceModelStore(private val context: Context) {
         const val ARCHIVE_DONE = ".archive-extracted"
         const val PART = ".part"
     }
+}
+
+/** 2.1.1: where a voice pack lives across the shared and private folders. Pure, unit-tested. */
+object VoiceDirs {
+    /** First folder of [dirs] with a complete [id] (its [marker] present), else `writeDir/id`. */
+    fun packDir(dirs: List<File>, writeDir: File, id: String, marker: String): File =
+        dirs.map { File(it, id) }.firstOrNull { File(it, marker).exists() } ?: File(writeDir, id)
 }

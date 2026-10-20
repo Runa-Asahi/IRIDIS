@@ -44,7 +44,7 @@ sh scripts/host-test.sh /tmp/smol.gguf
 ## 模型
 - **GGUF**：任意 llama.cpp 支持的模型。推荐 Qwen3-4B/8B Q4_K_M（支持深度思考）、Gemma-3-4B-it、DeepSeek-R1-Distill-Qwen-7B。
 - **LiteRT-LM**：`litert-community/*` 上的通用 `.litertlm`。`*.qualcomm.sm8750.litertlm` 是 NPU 专用编译版本，需对应芯片才能加载，通用手机请用不带芯片后缀的文件。
-- 导入方式：App 内「模型管理 › 导入」，或直接放到 `/sdcard/Android/data/com.iridis/files/models/`。
+- 导入方式：App 内「模型管理 › 导入」，或直接放到 `/sdcard/Android/data/com.iridis/files/models/`（开启「全部文件访问」后为 `/sdcard/Download/IRIDIS/models/`）。
 
 ## MNN（full 版第三引擎）
 - 预编译静态库在 `third_party/mnn/`（MNN master @ 9f097c5 + `scripts/mnn-port-patch.py` 补丁，Apache-2.0 修改声明见该脚本）。`scripts/fetch-deps.sh` 会自动从 GitHub Release 下载并校验；从源码重建：`NDK=/path/to/ndk-r30 sh scripts/build-mnn-android.sh`（CPU/ARM82/KleidiAI + OpenCL + LLM，约 15–30 分钟）。

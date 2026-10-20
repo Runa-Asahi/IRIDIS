@@ -4,13 +4,22 @@ import kotlinx.serialization.json.JsonObject
 import java.io.File
 
 /** 1.12.0: one skill: a folder with a SKILL.md (agentskills.io layout). */
-data class SkillInfo(val name: String, val description: String, val source: String, val body: () -> String, val files: () -> List<String> = { emptyList() })
+data class SkillInfo(
+    val name: String, val description: String, val source: String, val body: () -> String,
+    /** Other files of the skill, relative to its folder. */
+    val files: () -> List<String> = { emptyList() },
+    /** 2.1.1: text of one of [files] (null = missing, too big or outside the skill folder). */
+    val readFile: (String) -> String? = { null },
+)
 
 /**
  * 1.12.0 Skills: instructions the model loads only when a task needs them, so they cost almost no
- * prompt (one line each). Built-in skills ship in the APK (assets/skills); the user adds their
- * own as `skills/<name>/SKILL.md` in the workspace (a same-named workspace skill wins). Scripts
- * next to a SKILL.md run with run_command (best with the Alpine backend).
+ * prompt (one line each). Built-in skills ship in the APK (assets/skills, read-only); the user adds their
+ * own as `skills/<name>/SKILL.md` in the app's resource root (a same-named user skill wins).
+ * 2.1.1: that root is Download/IRIDIS (filesDir/iridis in 应用私有目录 mode), outside the agent
+ * workspace, so the file tools can neither read nor change a skill; the [SkillTool] reads its
+ * SKILL.md and, with `file`, one of its other files (the model can then write a copy into the
+ * workspace to run it).
  */
 class SkillCatalog(private val builtIn: () -> List<SkillInfo>, private val workspace: () -> File?) {
     @Volatile private var cache: Pair<Long, List<SkillInfo>>? = null
@@ -47,10 +56,18 @@ class SkillCatalog(private val builtIn: () -> List<SkillInfo>, private val works
                     description = meta["description"].orEmpty(),
                     source = "$DIR/${d.name}",
                     body = { runCatching { f.readText() }.getOrDefault(text) },
-                    files = { d.walkTopDown().filter { it.isFile && it.name != FILE }.take(30).map { "$DIR/${d.name}/" + it.relativeTo(d).path }.toList() },
+                    files = { d.walkTopDown().filter { it.isFile && it.name != FILE }.take(30).map { it.relativeTo(d).path.replace('\\', '/') }.toList() },
+                    readFile = { rel -> readIn(d, rel) },
                 )
             }.orEmpty()
         }
+
+        /** A file inside [dir] (symlinks resolved, never outside it), as text; null when missing or over 200 KB. */
+        fun readIn(dir: File, rel: String): String? = runCatching {
+            val base = dir.canonicalFile
+            val f = File(base, rel.trim().trimStart('/')).canonicalFile
+            if (!f.path.startsWith(base.path + File.separator) || !f.isFile || f.length() > 200_000) null else f.readText()
+        }.getOrNull()
 
         /** `---\nname: x\ndescription: y\n---\nbody` → (meta, body). Pure. */
         fun frontMatter(text: String): Pair<Map<String, String>, String> {
@@ -73,8 +90,8 @@ class SkillCatalog(private val builtIn: () -> List<SkillInfo>, private val works
 object SkillTool : AgentTool {
     override val name = "skill"
     override val label = "技能"
-    override val description = "按需读取技能说明（内置技能 + 工作区 skills 文件夹里的 SKILL.md）"
-    override val promptLine = "skill(name): load a skill's instructions, then follow them"
+    override val description = "按需读取技能说明（内置技能 + 下载/IRIDIS/skills 里的 SKILL.md，只读）"
+    override val promptLine = "skill(name, file?): load a skill or one of its files"
     override val risk = ToolRisk.READ
     override val group = ToolGroup.SKILLS
 
@@ -82,11 +99,15 @@ object SkillTool : AgentTool {
         val cat = env.skills ?: return ToolResult(false, "Error: skills are not available", "不可用")
         val n = Args.str(args, "name", "skill", "id") ?: throw IllegalArgumentException("缺少参数 name")
         val s = cat.find(n) ?: return ToolResult(false, "Error: no skill \"$n\". Available: ${cat.all().joinToString { it.name }}", "没有这个技能")
+        Args.str(args, "file", "path")?.takeIf { it.isNotBlank() }?.let { rel ->
+            val text = s.readFile(rel) ?: return ToolResult(false, "Error: no file \"$rel\" in skill ${s.name}. Files: ${s.files().joinToString()}", "没有这个文件")
+            return ToolResult(true, capTokens(text, env.outputTokens * 2), "${s.name}/$rel")
+        }
         val (_, body) = SkillCatalog.frontMatter(s.body())
         val files = s.files()
         val out = buildString {
             append("Skill ").append(s.name).append(" (").append(s.source).append(")\n").append(body.trim())
-            if (files.isNotEmpty()) append("\n\nFiles: ").append(files.joinToString())
+            if (files.isNotEmpty()) append("\n\nFiles (read with skill(name, file)): ").append(files.joinToString())
         }
         return ToolResult(true, capTokens(out, env.outputTokens * 2), s.name)
     }

@@ -150,7 +150,8 @@ class AgentContainer(context: Context) {
         val state = runCatching { android.os.Environment.getExternalStorageState() }.getOrNull()
         val choice = WorkspaceResolver.resolve(loc, downloads, state, privateRoot)
         val sb = runCatching { WorkspaceSandbox(choice.root) }.getOrElse {
-            WorkspaceSandbox(privateRoot).also { return Ws(WorkspaceChoice(loc, WorkspaceLocation.PRIVATE, privateRoot, "无法使用 ${choice.root.path}，智能体工作区暂时改用应用私有目录"), it) }
+            WorkspaceSandbox(privateRoot).also { return Ws(WorkspaceChoice(loc, WorkspaceLocation.PRIVATE, privateRoot, "无法使用 ${choice.root.path}，智能体工作区暂时改用应用私有目录",
+                appRoot = WorkspaceResolver.privateAppRoot(privateRoot)), it) }
         }
         return Ws(choice, sb)
     }
@@ -163,6 +164,12 @@ class AgentContainer(context: Context) {
     /** The sandbox of the current workspace (changes when the location setting changes). */
     val sandbox: WorkspaceSandbox get() = ws.value.sandbox
 
+    /**
+     * 2.1.1: the resource root holding skills/ and knowledge/ — `Download/IRIDIS` (beside the sandbox
+     * `Download/IRIDIS/workspace`) or `filesDir/iridis` in 应用私有目录 mode. Never handed to a tool.
+     */
+    val appRoot: java.io.File get() = ws.value.choice.appRoot
+
     /** Re-resolves the location (after the setting changed, or storage came back). */
     fun refreshWorkspace() {
         val next = resolveWorkspace()
@@ -174,14 +181,52 @@ class AgentContainer(context: Context) {
     fun setWorkspaceLocation(loc: WorkspaceLocation) {
         settings.update { it.copy(workspace = loc.name) }
         refreshWorkspace()
+        // 2.1.1: the newly chosen place may still have the old layout.
+        runCatching { migrateLayout() }.getOrNull()?.let { r -> StorageLayout.notice(r)?.let { workspaceNote.value = it } }
     }
 
-    /** SAF grant (read-only view of files the app did not create), only while the workspace is Download/IRISLocalAI. */
-    fun externalFiles(): ExternalFiles? {
+    /**
+     * SAF grant of Download/IRIDIS (files the app did not create), only while the workspace is in Download.
+     * 2.1.1: the agent's view is limited to `workspace/` inside the tree.
+     */
+    fun externalFiles(): ExternalFiles? = saf(SafPaths.WORKSPACE)
+
+    /** 2.1.1: the whole granted tree, for the 知识库 (knowledge/) and the one-time move — never for tools. */
+    private fun externalRoot(): SafWorkspaceFiles? = saf(SafPaths.ROOT)
+
+    private fun saf(base: List<String>): SafWorkspaceFiles? {
         if (ws.value.choice.location != WorkspaceLocation.DOWNLOADS) return null
         val uri = settings.current.workspaceTreeUri?.let { runCatching { android.net.Uri.parse(it) }.getOrNull() } ?: return null
         val granted = runCatching { ctx.contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission } }.getOrDefault(false)
-        return if (granted) SafWorkspaceFiles(ctx, uri) else null
+        return if (granted) SafWorkspaceFiles(ctx, uri, base) else null
+    }
+
+    /**
+     * 2.1.1: one-time move of the user files at the root of Download/IRIDIS (the 2.1.0 workspace) into
+     * Download/IRIDIS/workspace — everything except [StorageLayout.RESERVED]. Uses direct File access,
+     * then the SAF grant for what File access cannot see. The marker is written only when the app saw
+     * everything (全部文件访问 or SAF) and nothing failed, otherwise it runs again next time.
+     * 应用私有目录 mode: moves skills/ and knowledge/ out of filesDir/workspace into filesDir/iridis once.
+     * [force] ignores the marker (after the old IRISLocalAI folder was copied into the root).
+     * Call off the main thread. Returns null when nothing was attempted.
+     */
+    @Synchronized
+    fun migrateLayout(force: Boolean = false): StorageLayout.Result? {
+        val c = ws.value.choice
+        val root = c.appRoot
+        if (!force && StorageLayout.markerExists(root)) return null
+        if (c.location == WorkspaceLocation.PRIVATE) {
+            val r = StorageLayout.extract(c.root, root)
+            if (r.ok && root.isDirectory) StorageLayout.writeMarker(root)
+            if (r.moved > 0) { skills.invalidate(); changed() }
+            return r.takeIf { it.moved > 0 || !it.ok }
+        }
+        val direct = StorageLayout.migrate(root)
+        val tree = externalRoot()
+        val r = StorageLayout.combine(direct, tree?.migrateLayout())
+        if (StorageLayout.complete(r, fullView = hasAllFilesAccess() || tree != null)) StorageLayout.writeMarker(root)
+        if (r.moved > 0) changed()
+        return r.takeIf { it.moved > 0 || !it.ok }
     }
 
     /**
@@ -217,7 +262,12 @@ class AgentContainer(context: Context) {
         val oldExists = old.isDirectory
         val visible = if (oldExists) old.walkTopDown().count { it.isFile && it.canRead() } else 0
         val allFiles = android.os.Build.VERSION.SDK_INT < 30 || runCatching { android.os.Environment.isExternalStorageManager() }.getOrDefault(false)
-        val newHasFiles = c.location == WorkspaceLocation.DOWNLOADS && c.root.walkTopDown().any { it.isFile && !it.name.startsWith(".iris-") }
+        // 2.1.1: the old folder is copied into the resource root, then [migrateLayout] moves it into workspace/.
+        // App-managed models/ and voice/ do not count as user files.
+        val target = c.appRoot
+        val newHasFiles = c.location == WorkspaceLocation.DOWNLOADS && target.listFiles().orEmpty()
+            .filter { !StorageLayout.isInternal(it.name) && !it.name.equals(StorageLayout.MODELS, true) && !it.name.equals(StorageLayout.VOICE, true) }
+            .any { f -> f.walkTopDown().any { it.isFile && !StorageLayout.isInternal(it.name) } }
         val action = LegacyWorkspace.decide(c.location == WorkspaceLocation.DOWNLOADS, oldExists, visible, allFiles, newHasFiles)
         var result: MigrationResult? = null
         legacyHintFlow.value = when (action) {
@@ -225,11 +275,12 @@ class AgentContainer(context: Context) {
             LegacyWorkspace.Action.HINT -> LegacyWorkspace.HINT
             LegacyWorkspace.Action.DELETE_OLD -> { runCatching { old.deleteRecursively() }; null }
             LegacyWorkspace.Action.MIGRATE -> {
-                val r = WorkspaceMigration.migrate(old, c.root)
+                val r = WorkspaceMigration.migrate(old, target)
                 result = r
                 val left = old.walkTopDown().any { it.isFile }
                 if (r.ok && !left) runCatching { old.deleteRecursively() }
                 changed()
+                if (r.copied > 0) runCatching { migrateLayout(force = true) }
                 LegacyWorkspace.afterMigrate(r, left)
             }
         }
@@ -272,7 +323,8 @@ class AgentContainer(context: Context) {
                     ?.let { SkillCatalog.parse(d, it, "内置") }
             } }.getOrDefault(emptyList())
         }
-        SkillCatalog({ builtIn }, { sandbox.root })
+        // 2.1.1: user skills in Download/IRIDIS/skills (or filesDir/iridis/skills) — outside the sandbox.
+        SkillCatalog({ builtIn }, { appRoot })
     }
 
     /** 1.12.0: Alpine under PRoot, with the workspace bound at /workspace. */
@@ -306,8 +358,11 @@ class AgentContainer(context: Context) {
         }.onFailure { android.util.Log.w("IrisHistory", "history store unavailable", it) }.getOrNull()
     }
 
-    /** 2.1.0 知识库: workspace/knowledge, index in filesDir/knowledge/index.json. */
-    val knowledge = com.iris.localai.knowledge.KnowledgeBase({ sandbox.root }, java.io.File(context.filesDir, "knowledge/index.json"), { externalFiles() })
+    /**
+     * 2.1.0 知识库, index in filesDir/knowledge/index.json. 2.1.1: the files are in Download/IRIDIS/knowledge
+     * (or filesDir/iridis/knowledge), outside the sandbox; kb_search reaches them only through this.
+     */
+    val knowledge = com.iris.localai.knowledge.KnowledgeBase({ appRoot }, java.io.File(context.filesDir, "knowledge/index.json"), { externalRoot() })
 
     /** Memory changed in settings or by the tool: bumps so the 记忆 page re-reads. */
     private val _memoryRevision = MutableStateFlow(0)

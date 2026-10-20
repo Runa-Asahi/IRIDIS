@@ -698,10 +698,11 @@ class V1100Test {
         val priv = File(tmp, "files/workspace")
         val d = com.iris.localai.agent.WorkspaceResolver.resolve(com.iris.localai.agent.WorkspaceLocation.DOWNLOADS, downloads, "mounted", priv)
         assertEquals(com.iris.localai.agent.WorkspaceLocation.DOWNLOADS, d.location)
-        assertEquals(File(downloads, "IRIDIS"), d.root)
+        assertEquals(File(downloads, "IRIDIS/workspace"), d.root) // 2.1.1: the sandbox is the workspace/ subfolder
+        assertEquals(File(downloads, "IRIDIS"), d.appRoot)
         assertTrue(d.root.isDirectory); assertNull(d.fallbackReason)
         assertFalse("probe file removed", File(d.root, ".iris-probe").exists())
-        assertTrue(com.iris.localai.agent.WorkspaceResolver.display(d).endsWith("Download/IRIDIS"))
+        assertTrue(com.iris.localai.agent.WorkspaceResolver.display(d).endsWith("Download/IRIDIS/workspace"))
         // 应用私有目录 chosen
         val p = com.iris.localai.agent.WorkspaceResolver.resolve(com.iris.localai.agent.WorkspaceLocation.PRIVATE, downloads, "mounted", priv)
         assertEquals(priv, p.root); assertNull(p.fallbackReason)
@@ -727,7 +728,7 @@ class V1100Test {
         assertEquals(com.iris.localai.agent.WorkspaceLocation.PRIVATE, AgentSettings(workspace = "private").workspaceLocation)
         val old = Json { ignoreUnknownKeys = true }.decodeFromString(AgentSettings.serializer(), "{\"agentMode\":true,\"maxSteps\":5}")
         assertEquals(com.iris.localai.agent.WorkspaceLocation.DOWNLOADS, old.workspaceLocation); assertNull(old.workspaceTreeUri)
-        assertEquals(listOf("下载/IRIDIS", "应用私有目录"), com.iris.localai.agent.WorkspaceLocation.entries.map { it.label })
+        assertEquals(listOf("下载/IRIDIS/workspace", "应用私有目录"), com.iris.localai.agent.WorkspaceLocation.entries.map { it.label })
         // SAF grant must be exactly Download/IRIDIS
         assertTrue(com.iris.localai.agent.WorkspaceResolver.isWorkspaceTree("primary:Download/IRIDIS"))
         assertTrue(com.iris.localai.agent.WorkspaceResolver.isWorkspaceTree("primary:Download/IRIDIS/"))

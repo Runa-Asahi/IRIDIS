@@ -164,7 +164,7 @@ fun AgentExtraSections() {
             SettingsRow(sk.name, subtitle = sk.description.ifBlank { "（无说明）" } + " · " + sk.source, subtitleMaxLines = 2)
         }
     }
-    GroupFootnote("自定义技能放在工作区 skills/<名字>/SKILL.md。")
+    GroupFootnote(SkillText.FOLDER)
 }
 
 /**
@@ -184,7 +184,7 @@ fun BackupSection() {
     val c = Iris.colors
     // ---- 备份与日志 ----
     SectionTitle("备份与日志")
-    val exportBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+    val exportBackup = rememberLauncherForActivityResult(CreateDocumentInConfig("application/zip")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         val withKey = includeApiKey
         scope.launch {
@@ -192,7 +192,7 @@ fun BackupSection() {
                 runCatching {
                     context.contentResolver.openOutputStream(uri)!!.use {
                         Backup.export(Backup.dataDir(context), it, com.iris.localai.BuildConfig.VERSION_NAME,
-                            workspace = agent.sandbox.root, includeApiKey = withKey)
+                            workspace = agent.appRoot, includeApiKey = withKey)
                     }
                 }.fold({ "已备份 $it 个文件" + if (withKey) "（含 API 密钥，请妥善保管）" else "" }, { "备份失败：${it.message}" })
             }
@@ -205,7 +205,7 @@ fun BackupSection() {
             info.onSuccess { confirmRestore = uri to it }.onFailure { message = "无法读取备份：${it.message}" }
         }
     }
-    val exportLogs = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+    val exportLogs = rememberLauncherForActivityResult(CreateDocumentInConfig("text/plain")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             message = withContext(Dispatchers.IO) {
@@ -251,7 +251,7 @@ fun BackupSection() {
                 confirmRestore = null
                 scope.launch {
                     val r = withContext(Dispatchers.IO) {
-                        runCatching { context.contentResolver.openInputStream(uri)!!.use { Backup.restore(Backup.dataDir(context), it, workspace = agent.sandbox.root) } }
+                        runCatching { context.contentResolver.openInputStream(uri)!!.use { Backup.restore(Backup.dataDir(context), it, workspace = agent.appRoot) } }
                     }
                     r.onSuccess { Backup.restart(context) }.onFailure { message = "导入失败：${it.message}" }
                 }
@@ -267,4 +267,26 @@ fun BackupSection() {
     message?.let { m ->
         IrisDialog(onDismiss = { message = null }, title = m, confirmText = "好", onConfirm = { message = null }, dismissText = null)
     }
+}
+
+object SkillText {
+    /** 2.1.1: user skills are an app resource beside the workspace (the agent reads them only through the 技能 tool). */
+    val FOLDER = "自定义技能放在 ${com.iris.localai.agent.StorageLayout.label(com.iris.localai.agent.StorageLayout.SKILLS)}/<名字>/SKILL.md" +
+        "（应用私有目录模式下在应用内部）。智能体只能用「技能」工具读取，不能修改。"
+}
+
+/**
+ * 2.1.1: the save dialog for backups and logs opens in Download/IRIDIS/config (created when missing);
+ * the user can still pick any other folder.
+ */
+class CreateDocumentInConfig(mime: String) : ActivityResultContracts.CreateDocument(mime) {
+    override fun createIntent(context: android.content.Context, input: String): android.content.Intent =
+        super.createIntent(context, input).apply {
+            runCatching {
+                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                    ?.let { com.iris.localai.agent.StorageLayout.configDir(it).mkdirs() }
+            }
+            putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI, android.provider.DocumentsContract.buildDocumentUri(
+                com.iris.localai.agent.WorkspaceResolver.EXTERNAL_STORAGE_AUTHORITY, com.iris.localai.agent.StorageLayout.docId(com.iris.localai.agent.StorageLayout.CONFIG)))
+        }
 }

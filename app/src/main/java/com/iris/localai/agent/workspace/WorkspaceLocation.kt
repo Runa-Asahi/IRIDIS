@@ -4,8 +4,11 @@ import java.io.File
 
 /** 1.10.0: where the agent workspace lives. */
 enum class WorkspaceLocation(val label: String) {
-    /** Public `Download/IRIDIS` (2.1.0; `Download/IRISLocalAI` before) — visible in the phone's file manager (default). */
-    DOWNLOADS("下载/IRIDIS"),
+    /**
+     * Public `Download/IRIDIS/workspace` (2.1.1; the whole `Download/IRIDIS` in 2.1.0, `Download/IRISLocalAI`
+     * before) — visible in the phone's file manager (default). The rest of Download/IRIDIS is app resources.
+     */
+    DOWNLOADS("下载/IRIDIS/workspace"),
     /** App-private `filesDir/workspace` (the 1.9.0 location). */
     PRIVATE("应用私有目录");
 
@@ -21,6 +24,11 @@ data class WorkspaceChoice(
     val root: File,
     /** Why the requested location could not be used (Chinese, shown as a notice); null = no fallback. */
     val fallbackReason: String? = null,
+    /**
+     * 2.1.1: the app's resource root that holds skills/ and knowledge/ (never the sandbox):
+     * `Download/IRIDIS` next to `workspace/`, or `filesDir/iridis` in 应用私有目录 mode.
+     */
+    val appRoot: File = File(root.parentFile ?: root, StorageLayout.PRIVATE_APP_DIR),
 )
 
 /**
@@ -37,7 +45,12 @@ object WorkspaceResolver {
     const val TREE_DOC_ID = "primary:Download/$FOLDER"
     const val EXTERNAL_STORAGE_AUTHORITY = "com.android.externalstorage.documents"
 
+    /** `Download/IRIDIS`: the app's resource root (2.1.1; the workspace itself in 2.1.0). */
     fun downloadsRoot(downloadsDir: File): File = File(downloadsDir, FOLDER)
+    /** `Download/IRIDIS/workspace`: the agent sandbox (2.1.1). */
+    fun downloadsWorkspace(downloadsDir: File): File = File(downloadsRoot(downloadsDir), StorageLayout.WORKSPACE)
+    /** 应用私有目录 mode: skills / knowledge next to (not inside) `filesDir/workspace`. */
+    fun privateAppRoot(privateRoot: File): File = File(privateRoot.absoluteFile.parentFile ?: privateRoot, StorageLayout.PRIVATE_APP_DIR)
 
     fun resolve(
         requested: WorkspaceLocation,
@@ -46,15 +59,16 @@ object WorkspaceResolver {
         privateRoot: File,
         usable: (File) -> Boolean = ::probe,
     ): WorkspaceChoice {
-        if (requested == WorkspaceLocation.PRIVATE) return WorkspaceChoice(requested, WorkspaceLocation.PRIVATE, privateRoot)
+        val privateApp = privateAppRoot(privateRoot)
+        if (requested == WorkspaceLocation.PRIVATE) return WorkspaceChoice(requested, WorkspaceLocation.PRIVATE, privateRoot, appRoot = privateApp)
         val reason = when {
             storageState != MOUNTED -> "外部存储不可用（$storageState）"
             downloadsDir == null -> "找不到系统「下载」文件夹"
-            !usable(downloadsRoot(downloadsDir)) -> "无法在「下载」里创建 $FOLDER 文件夹"
+            !usable(downloadsWorkspace(downloadsDir)) -> "无法在「下载」里创建 $FOLDER/${StorageLayout.WORKSPACE} 文件夹"
             else -> null
         }
-        return if (reason == null) WorkspaceChoice(requested, WorkspaceLocation.DOWNLOADS, downloadsRoot(downloadsDir!!))
-        else WorkspaceChoice(requested, WorkspaceLocation.PRIVATE, privateRoot, "$reason，智能体工作区暂时改用应用私有目录")
+        return if (reason == null) WorkspaceChoice(requested, WorkspaceLocation.DOWNLOADS, downloadsWorkspace(downloadsDir!!), appRoot = downloadsRoot(downloadsDir))
+        else WorkspaceChoice(requested, WorkspaceLocation.PRIVATE, privateRoot, "$reason，智能体工作区暂时改用应用私有目录", appRoot = privateApp)
     }
 
     /** The folder exists (created if needed) and a file can be written and removed in it. */
@@ -68,11 +82,14 @@ object WorkspaceResolver {
         ok
     }.getOrDefault(false)
 
-    /** Whether a SAF tree grant is exactly `Download/IRIDIS` (any other folder is refused: the sandbox root must not change). */
+    /**
+     * Whether a SAF tree grant is exactly `Download/IRIDIS` (any other folder is refused). 2.1.1: the grant
+     * stays the whole folder (for the one-time move and the 知识库), but the agent only sees its `workspace/`.
+     */
     fun isWorkspaceTree(treeDocumentId: String?): Boolean =
         treeDocumentId != null && treeDocumentId.trimEnd('/').equals(TREE_DOC_ID, ignoreCase = false)
 
-    /** Path shown to the user: `/storage/emulated/0/Download/IRIDIS`. */
+    /** Path shown to the user: `/storage/emulated/0/Download/IRIDIS/workspace`. */
     fun display(choice: WorkspaceChoice): String = choice.root.path
 }
 
