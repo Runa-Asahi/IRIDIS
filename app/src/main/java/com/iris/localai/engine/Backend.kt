@@ -35,6 +35,10 @@ data class BackendEnvironment(
     val npuRuntimeInstalled: Boolean,
     /** The full flavour ships LiteRT-LM and MNN. */
     val fullFlavor: Boolean,
+    /** 2.2.0: why GenieX cannot run right now (not in this build / not Snapdragon / runtime missing), null = ready. */
+    val geniexBlock: String? = com.iris.localai.engine.geniex.GenieX.NOT_IN_BUILD,
+    /** 2.2.0: this chip can run AI Hub QAIRT bundles through GenieX. */
+    val geniexQairt: Boolean = false,
 ) {
     companion object {
         private val OPENCL_PATHS = listOf(
@@ -48,11 +52,14 @@ data class BackendEnvironment(
 
         fun probe(context: Context): BackendEnvironment {
             val npu = runCatching { EngineFactory.npu(context) }.getOrNull()
+            val gx = runCatching { EngineFactory.geniex(context) }.getOrNull()
             return BackendEnvironment(
                 hasOpenCl = OPENCL_PATHS.any { java.io.File(it).exists() },
                 npuSoc = npu?.takeIf { it.chipLabel != null }?.let { socModel() },
                 npuRuntimeInstalled = npu?.state?.value is NpuState.Installed,
                 fullFlavor = ModelFormat.LITERT in EngineFactory.supportedFormats,
+                geniexBlock = com.iris.localai.engine.geniex.GenieXRules.block(gx?.state?.value),
+                geniexQairt = gx?.qairtSupported == true,
             )
         }
     }
@@ -80,10 +87,12 @@ object BackendCapabilities {
     fun npuTarget(fileName: String): String? = NpuIds.targetSoc(fileName)
     fun npuKv(fileName: String): Int? = NpuIds.kvCapacity(fileName)
 
-    fun options(format: ModelFormat, fileName: String, env: BackendEnvironment): List<BackendOption> {
+    fun options(format: ModelFormat, fileName: String, env: BackendEnvironment, engine: String? = null): List<BackendOption> {
         val noCl = "本机没有可用的 OpenCL 驱动"
         return when (format) {
-            ModelFormat.GGUF -> listOf(
+            ModelFormat.GGUF -> if (engine == com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX) {
+                com.iris.localai.engine.geniex.GenieXRules.ggufOptions(env)
+            } else listOf(
                 BackendOption(Backend.CPU, true, detail = "llama.cpp · ARM KleidiAI"),
                 BackendOption(Backend.GPU, env.hasOpenCl, if (env.hasOpenCl) null else noCl, "Adreno · OpenCL（Q4_0 / Q8_0 最快）"),
                 BackendOption(Backend.NPU, false, "llama.cpp 没有高通 NPU 后端；NPU 请用 _sm8750 编译的 .litertlm 模型"),
@@ -128,11 +137,12 @@ object BackendCapabilities {
                     BackendOption(Backend.NPU, false, "未编入 MNN 的 QNN 后端（需按芯片离线转换的专用模型）"),
                 )
             }
+            ModelFormat.QAIRT -> com.iris.localai.engine.geniex.GenieXRules.qairtOptions(env)
         }
     }
 
-    fun features(format: ModelFormat, fileName: String, backend: Backend? = null): EngineFeatures = when (format) {
-        ModelFormat.GGUF -> EngineFeatures(
+    fun features(format: ModelFormat, fileName: String, backend: Backend? = null, engine: String? = null): EngineFeatures = when (format) {
+        ModelFormat.GGUF -> if (engine == com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX) com.iris.localai.engine.geniex.GenieXRules.GGUF_FEATURES else EngineFeatures(
             contextShift = true, flashAttention = true, kvQuant = true, mmap = true,
             presenceFrequency = true, seed = true, batchSize = true, liveThreads = true,
         )
@@ -142,6 +152,7 @@ object BackendCapabilities {
             fixedContext = if (npuTarget(fileName) != null) NpuIds.historyBudget(fileName) else null,
         )
         ModelFormat.MNN -> EngineFeatures(mmap = true)
+        ModelFormat.QAIRT -> com.iris.localai.engine.geniex.GenieXRules.QAIRT_FEATURES
     }
 
     /** Reason context shift is unavailable for this engine, or null when it is supported. */
@@ -149,6 +160,7 @@ object BackendCapabilities {
         ModelFormat.GGUF, null -> null
         ModelFormat.LITERT -> "LiteRT-LM 的会话 KV 由运行时管理，不支持上下文平移；将按 token 预算截断"
         ModelFormat.MNN -> "MNN 的 prompt cache 不支持位置平移；将按 token 预算截断"
+        ModelFormat.QAIRT -> "QAIRT 包的 KV 缓存在编译时固定，不支持上下文平移；将按 token 预算截断"
     }
 
     /**
@@ -265,5 +277,5 @@ class BackendCrashMemory(context: Context) {
 }
 
 /** Helper for the UI: the options of a model, plus whether a backend crashed before. */
-fun LocalModel.backendOptions(env: BackendEnvironment): List<BackendOption> =
-    BackendCapabilities.options(format, fileName, env)
+fun LocalModel.backendOptions(env: BackendEnvironment, engine: String? = null): List<BackendOption> =
+    BackendCapabilities.options(format, fileName, env, engine)

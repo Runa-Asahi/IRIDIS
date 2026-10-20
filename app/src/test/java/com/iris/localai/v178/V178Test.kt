@@ -172,13 +172,19 @@ class V178Test {
         for (t in ResourceTier.entries) assertEquals(t.ordinal, AppSettings(resourceTier = t.ordinal).migrated().sanitized().resourceTier)
     }
 
+    @Test fun ggufEngineDefaultsToBuiltInLlama() {
+        // 2.2.0: GenieX is opt-in; every existing GGUF model keeps running on llama.cpp.
+        val now = json.parseToJsonElement(json.encodeToString(AppSettings.serializer(), AppSettings())).jsonObject
+        assertEquals("\"llama\"", now["ggufEngine"].toString())
+    }
+
     @Test fun noExistingKeyOrDefaultChanged() {
         val now = json.parseToJsonElement(json.encodeToString(AppSettings.serializer(), AppSettings())).jsonObject
         for ((k, v) in DEFAULTS_177) {
             assertTrue("key $k still exists", k in now)
             assertEquals("default of $k", v, now[k].toString())
         }
-        assertEquals(setOf("tierProfiles", "thinkingBudget", "mnnNoVisual", "mnnForceNoMmap", "topBarCapsules", "showStatusRack", "welcomeAccepted", "thermalLimitC", "knowledgeInChat", "haptics", "sound"), now.keys - DEFAULTS_177.map { it.first }.toSet() - setOf("askedBatteryExemption"))
+        assertEquals(setOf("tierProfiles", "thinkingBudget", "mnnNoVisual", "mnnForceNoMmap", "topBarCapsules", "showStatusRack", "welcomeAccepted", "thermalLimitC", "knowledgeInChat", "haptics", "sound", "ggufEngine"), now.keys - DEFAULTS_177.map { it.first }.toSet() - setOf("askedBatteryExemption"))
     }
 
     // ---------------------------------------------------------------- pinning from the user's cores

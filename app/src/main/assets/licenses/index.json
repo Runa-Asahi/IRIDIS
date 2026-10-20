@@ -130,5 +130,11 @@
   "license": "MIT",
   "file": "mit-silero-vad.txt",
   "url": "https://github.com/snakers4/silero-vad"
+ },
+ {
+  "name": "Qualcomm GenieX (Kotlin SDK classes)",
+  "license": "BSD-3-Clause; native runtime: Qualcomm Terms of Use (downloaded by the user)",
+  "file": "bsd-3-geniex.txt",
+  "url": "https://github.com/qualcomm/GenieX"
  }
 ]

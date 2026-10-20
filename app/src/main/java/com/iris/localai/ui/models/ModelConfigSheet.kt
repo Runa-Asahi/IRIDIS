@@ -72,10 +72,12 @@ fun ModelConfigSheet(model: LocalModel, onDismiss: () -> Unit) {
     val state by engine.state.collectAsStateWithLifecycle()
     val o = configs[model.id] ?: ModelOverrides()
     val eff = EffectiveModelConfig.resolve(settings, model.format, o)
-    val options = remember(model.id, configs) { engine.backendOptions(model) }
+    val options = remember(model.id, configs, settings.ggufEngine) { engine.backendOptions(model) }
     var crashTick by remember { mutableIntStateOf(0) }
     val crashed = remember(model.id, crashTick) { engine.crashMemory.crashed(model.id) }
-    val features = BackendCapabilities.features(model.format, model.fileName)
+    // 2.2.0: GGUF can run on llama.cpp or Qualcomm GenieX (full flavour).
+    val engineId = engine.engineFor(model, eff)
+    val features = BackendCapabilities.features(model.format, model.fileName, engine = engineId)
     val auto = BackendCapabilities.autoBackend(model.format, model.fileName, options, engine.threadPolicy.nominal(engine.tier).allowGpu)
     val loaded = (state as? EngineState.Ready)?.takeIf { it.model.path == model.path }
     fun set(block: (ModelOverrides) -> ModelOverrides) = repo.update(model.id, block)
@@ -95,6 +97,35 @@ fun ModelConfigSheet(model: LocalModel, onDismiss: () -> Unit) {
                 style = IrisType.caption, color = c.textTertiary,
                 modifier = Modifier.padding(horizontal = IrisDimens.pageGutter + 4.dp, vertical = 4.dp),
             )
+
+            // ---- 2.2.0: engine (GGUF, full flavour) ----
+            if (model.format == com.iris.localai.data.ModelFormat.GGUF && container.engine.hasGeniex) {
+                SectionTitle("引擎")
+                SettingsGroup {
+                    SegmentedRow(
+                        "推理引擎", listOf("跟随默认", "llama.cpp", "GenieX"),
+                        when (com.iris.localai.engine.geniex.GenieX.parseEngine(o.engine)) {
+                            com.iris.localai.engine.geniex.GenieX.ENGINE_LLAMA -> 1
+                            com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX -> 2
+                            else -> 0
+                        },
+                        { i ->
+                            set {
+                                it.copy(
+                                    engine = when (i) {
+                                        1 -> com.iris.localai.engine.geniex.GenieX.ENGINE_LLAMA
+                                        2 -> com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX
+                                        else -> null
+                                    },
+                                    backend = null,
+                                )
+                            }
+                        },
+                        subtitle = "当前：" + (if (engineId == com.iris.localai.engine.geniex.GenieX.ENGINE_GENIEX) "GenieX（高通，NPU / GPU / CPU）" else "llama.cpp（内置）") +
+                            "。切换后后端回到「自动」，重新加载生效",
+                    )
+                }
+            }
 
             // ---- Backend ----
             SectionTitle("后端")

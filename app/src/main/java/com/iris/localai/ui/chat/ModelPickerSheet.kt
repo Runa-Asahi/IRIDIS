@@ -57,6 +57,8 @@ fun ModelPickerSheet(
     /** 1.10.3: show 「建议：这个模型在 CPU 上加载更快（可选）」 + 改用 CPU ([com.iris.localai.engine.CpuFasterHint]). */
     cpuFaster: (LocalModel) -> Boolean = { false },
     onSwitchToCpu: (LocalModel) -> Unit = {},
+    /** 2.2.0: 「GenieX · NPU」 for models GenieX runs (null = the format label + backend). */
+    engineTag: (LocalModel) -> String? = { null },
 ) {
     val c = Iris.colors
     IrisSheet(onDismiss = onDismiss) {
@@ -119,7 +121,7 @@ fun ModelPickerSheet(
                         loading = m.path == loadingPath,
                         enabled = !busy && loading == null,
                         onClick = { onPick(m) },
-                        meta = m.pickerMeta((engine as? EngineState.Ready)?.takeIf { it.model.path == m.path }?.details?.backend, preferredBackend(m)),
+                        meta = m.pickerMeta((engine as? EngineState.Ready)?.takeIf { it.model.path == m.path }?.details?.backend, preferredBackend(m), engineTag(m)),
                         onSettings = { onConfigure(m) },
                         extra = lastLoad(m),
                     )

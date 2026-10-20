@@ -8,6 +8,7 @@ composeBom = "2024.12.01"
 coroutines = "1.9.0"
 serialization = "1.7.3"
 litertlm = "0.18.0"
+geniex = "0.8.0"
 junit = "4.13.2"
 sqliteJdbc = "3.46.1.3"
 commonsCompress = "1.27.1"
@@ -32,6 +33,8 @@ kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 litertlm-android = { group = "com.google.ai.edge.litertlm", name = "litertlm-android", version.ref = "litertlm" }
+# 2.2.0: Qualcomm GenieX (full flavour). Only its Kotlin classes are packaged; the .so files are a user download.
+geniex-android = { group = "com.qualcomm.qti", name = "geniex-android", version.ref = "geniex" }
 commons-compress = { group = "org.apache.commons", name = "commons-compress", version.ref = "commonsCompress" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 # 1.10.0: host SQLite (FTS5 + FTS4) for the history-store unit tests only; not packaged.

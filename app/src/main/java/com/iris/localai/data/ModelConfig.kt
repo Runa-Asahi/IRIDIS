@@ -43,6 +43,8 @@ data class ModelOverrides(
     val thinking: Boolean? = null,
     /** Replaces the global 自定义指令 for this model when non-null. */
     val systemPrompt: String? = null,
+    /** 2.2.0, GGUF only: "llama" / "geniex"; null = AppSettings.ggufEngine. */
+    val engine: String? = null,
 ) {
     val isEmpty: Boolean get() = this == ModelOverrides()
 
@@ -62,10 +64,11 @@ data class ModelOverrides(
         threads = threads?.coerceIn(0, 16),
         batchSize = batchSize?.coerceIn(0, 2048),
         kvCacheType = kvCacheType?.coerceIn(0, 2),
+        engine = com.iris.localai.engine.geniex.GenieX.parseEngine(engine),
     )
 
     /** Keys whose change only takes effect after reloading the model. */
-    fun loadSignature(): List<Any?> = listOf(backend, contextLength, batchSize, kvCacheType, flashAttention, useMmap, threads)
+    fun loadSignature(): List<Any?> = listOf(backend, contextLength, batchSize, kvCacheType, flashAttention, useMmap, threads, engine)
 }
 
 /** Global defaults + one model's overrides, fully resolved. */
@@ -91,6 +94,8 @@ data class EffectiveModelConfig(
     val warmup: Boolean,
     val thinking: Boolean,
     val systemPrompt: String,
+    /** 2.2.0: engine for GGUF files ([com.iris.localai.engine.geniex.GenieX.ENGINE_LLAMA] / ENGINE_GENIEX). */
+    val engine: String = com.iris.localai.engine.geniex.GenieX.ENGINE_LLAMA,
 ) {
     companion object {
         fun resolve(s: AppSettings, format: ModelFormat?, o: ModelOverrides?): EffectiveModelConfig {
@@ -117,6 +122,9 @@ data class EffectiveModelConfig(
                 warmup = m.warmup ?: s.warmup,
                 thinking = m.thinking ?: s.deepThinking,
                 systemPrompt = m.systemPrompt ?: s.systemPrompt,
+                engine = com.iris.localai.engine.geniex.GenieX.parseEngine(m.engine)
+                    ?: com.iris.localai.engine.geniex.GenieX.parseEngine(s.ggufEngine)
+                    ?: com.iris.localai.engine.geniex.GenieX.ENGINE_LLAMA,
             )
         }
     }

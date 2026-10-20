@@ -265,7 +265,8 @@ fun ModelBackendPage(vm: SettingsViewModel, onBack: () -> Unit, onModels: () -> 
 
             SectionTitle("默认后端")
             SettingsGroup {
-                val formats = com.iris.localai.engine.EngineFactory.supportedFormats.toList()
+                // 2.2.0: QAIRT bundles only run on the NPU — nothing to choose.
+                val formats = com.iris.localai.engine.EngineFactory.supportedFormats.filter { it != com.iris.localai.data.ModelFormat.QAIRT }
                 formats.forEachIndexed { i, f ->
                     if (i > 0) Divider()
                     val cur = s.defaultBackends[f.name]
@@ -277,6 +278,7 @@ fun ModelBackendPage(vm: SettingsViewModel, onBack: () -> Unit, onModels: () -> 
                             com.iris.localai.data.ModelFormat.GGUF -> "自动 = CPU。GPU 走 Adreno OpenCL，Q4_0 / Q8_0 最快，首次加载要编译内核"
                             com.iris.localai.data.ModelFormat.LITERT -> "自动 = GPU（Qwen3.5、Agents-A1 用 CPU）。GPU ${com.iris.localai.engine.BackendCapabilities.LITERT_GPU_WARNING}，之后会用缓存。文件名带 _sm8750 的 NPU 编译模型始终用 NPU"
                             com.iris.localai.data.ModelFormat.MNN -> "自动 = CPU。GPU 走 OpenCL"
+                            com.iris.localai.data.ModelFormat.QAIRT -> "只能用 NPU"
                         },
                     )
                 }
@@ -287,6 +289,8 @@ fun ModelBackendPage(vm: SettingsViewModel, onBack: () -> Unit, onModels: () -> 
                 SectionTitle("NPU")
                 SettingsGroup { NpuRuntimeRow(npu, onInstall = vm::installNpu, onCancel = vm::cancelNpu, onDelete = vm::deleteNpu) }
             }
+
+            vm.geniex?.let { gx -> GenieXSection(vm, gx, s.ggufEngine) }
 
             SectionTitle("加载选项（修改后需重新加载模型）")
             SettingsGroup {
@@ -577,7 +581,7 @@ fun AboutPage(onBack: () -> Unit) {
 }
 
 internal const val ABOUT_PRIVACY =
-    "对话、推理、语音识别与合成都在本机完成，对话内容不会上传。联网仅用于：你发起的模型/语音包/NPU 运行库/Linux 环境下载，" +
+    "对话、推理、语音识别与合成都在本机完成，对话内容不会上传。联网仅用于：你发起的模型/语音包/NPU 运行库/GenieX 运行库/Linux 环境下载，" +
         "智能体开启联网工具时的搜索与网页读取，以及你开启的本地 API。"
 
 /** 1.14.7: every bundled / downloadable third-party component with its license. */
@@ -586,6 +590,7 @@ internal val OPEN_SOURCE = listOf(
     "MNN" to "Apache-2.0（已修改）· MNN 推理",
     "Google LiteRT-LM" to "Apache-2.0 · .litertlm 推理",
     "LiteRT Dispatch (Qualcomm)" to "Apache-2.0 · NPU 调度层",
+    "Qualcomm GenieX（Kotlin 层）" to "BSD-3-Clause · full 版 GenieX 引擎；原生运行库为高通专有软件，用户自行下载",
     "sherpa-onnx" to "Apache-2.0 · 语音识别 / 合成 / VAD",
     "ONNX Runtime" to "MIT · 语音模型运行时",
     "Khronos OpenCL 头文件" to "Apache-2.0 · GPU 加速",

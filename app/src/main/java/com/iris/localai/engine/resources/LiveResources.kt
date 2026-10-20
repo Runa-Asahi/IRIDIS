@@ -55,6 +55,7 @@ object LiveResourcePolicy {
         ModelFormat.GGUF -> if (backend == Backend.CPU) LiveApply.IMMEDIATE else LiveApply.NEXT_REPLY
         ModelFormat.MNN -> if (backend == Backend.CPU) LiveApply.LIVE_POLICY else LiveApply.RELOAD
         ModelFormat.LITERT -> LiveApply.RELOAD
+        ModelFormat.QAIRT -> LiveApply.NEXT_REPLY
         null -> LiveApply.NEXT_REPLY
     }
 
