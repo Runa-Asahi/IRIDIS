@@ -131,4 +131,24 @@ class V213SimplifyTest {
         assertEquals("加载中", com.iris.localai.engine.SlowLoadHint.subtitle(null, 0))
         assertTrue(chat.contains("ActivityIndicator(ui.engine, act, backdrop, onCancelLoad = vm::cancelLoad"))
     }
+
+    // ---------------------------------------------------------------- API bind address (bug fix)
+
+    @Test fun apiBindsIpv4Loopback() {
+        assertEquals("127.0.0.1", com.iris.localai.server.ApiPolicy.bindHost(lan = false))
+        assertEquals("0.0.0.0", com.iris.localai.server.ApiPolicy.bindHost(lan = true))
+        assertTrue(java.net.InetAddress.getByName(com.iris.localai.server.ApiPolicy.bindHost(false)) is java.net.Inet4Address)
+        val svc = source("src/main/java/com/iris/localai/server/ApiService.kt")
+        assertFalse(svc.contains("getLoopbackAddress"))
+        assertTrue(svc.contains("InetAddress.getByName(ApiPolicy.bindHost(lan))"))
+    }
+
+    @Test fun ipv4ClientReachesTheBoundServer() {
+        val port = java.net.ServerSocket(0).use { it.localPort }
+        val server = com.iris.localai.server.HttpServer(java.net.InetAddress.getByName(com.iris.localai.server.ApiPolicy.bindHost(false)), port) { _, _ -> }
+        server.start()
+        try {
+            java.net.Socket().use { it.connect(java.net.InetSocketAddress("127.0.0.1", port), 2000); assertTrue(it.isConnected) }
+        } finally { server.stop() }
+    }
 }

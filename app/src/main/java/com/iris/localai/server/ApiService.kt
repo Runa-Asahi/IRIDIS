@@ -56,7 +56,8 @@ class ApiService : LifecycleService() {
         val c = (application as IrisApp).container
         val s = c.settings.current
         val lan = s.apiAllowLan && s.apiKey.isNotBlank()
-        val bind = if (lan) InetAddress.getByName("0.0.0.0") else InetAddress.getLoopbackAddress()
+        // 2.1.3: IPv4 127.0.0.1 (not the IPv6 ::1 loopback) unless LAN is on.
+        val bind = InetAddress.getByName(ApiPolicy.bindHost(lan))
         val routes = ApiRoutes(c.engine, c.models, c.settings)
         val srv = HttpServer(bind, s.apiPort) { req, res ->
             wakeLock.acquire(10 * 60_000L)
