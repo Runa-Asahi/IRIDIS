@@ -171,7 +171,8 @@ class LiteRtEngine(private val context: Context) : InferenceEngine {
                 throw EngineException(
                     when {
                         npuModel != null ->
-                            "NPU 初始化失败。常见原因：系统 DSP 固件与运行库版本不兼容，或模型不是为本机芯片编译的。\n$msg"
+                            "NPU 初始化失败。常见原因：系统 DSP 固件与运行库版本不兼容，或模型不是为本机芯片编译的。\n$msg" +
+                                npuLogTail().let { if (it.isEmpty()) "" else "\n── 原生日志（QNN / FastRPC）──\n$it" }
                         "npu" in lower || "dispatch" in lower || "signature" in lower ->
                             "该模型是为特定芯片(NPU)编译的版本，请改用通用 .litertlm 文件\n$msg"
                         model.fileName.endsWith(".task", ignoreCase = true) ->
@@ -447,6 +448,20 @@ class LiteRtEngine(private val context: Context) : InferenceEngine {
      */
     private fun sameHistory(a: List<PromptMessage>?, b: List<PromptMessage>): Boolean =
         com.iris.localai.engine.HistoryMatch.same(a, b)
+
+    /**
+     * 2.1.1: the Kotlin exception only says "Failed to allocate tensors"; the real reason (QNN error
+     * code, FastRPC / rpcmem failure, skel not found…) is in this process's logcat. Keep the last
+     * matching lines so the error card itself shows it, without exporting diagnostics.
+     */
+    private fun npuLogTail(max: Int = 12): String = runCatching {
+        val p = Runtime.getRuntime().exec(
+            arrayOf("logcat", "-d", "-v", "brief", "--pid=${android.os.Process.myPid()}", "-t", "600"),
+        )
+        val lines = p.inputStream.bufferedReader().use { r -> r.readLines() }
+        p.waitFor()
+        com.iris.localai.engine.NpuLog.relevant(lines, max)
+    }.getOrDefault("")
 
     private fun rootMessage(t: Throwable): String =
         generateSequence(t) { it.cause }.last().let { it.message ?: it.javaClass.simpleName }

@@ -165,11 +165,11 @@ class NpuPathTest {
     private val arch = 79
     private val sizes = mapOf(
         "libLiteRtDispatch_Qualcomm.so" to 429_328L, "libQnnHtp.so" to 2_000_000L, "libQnnSystem.so" to 300_000L,
-        "libQnnHtpV79Stub.so" to 400_000L, "libQnnHtpV79Skel.so" to 9_000_000L,
+        "libQnnHtpV79Stub.so" to 400_000L, "libQnnHtpV79Skel.so" to 9_000_000L, "libQnnHtpPrepare.so" to 85_000_000L,
     )
     private val marker = NpuRuntimeFiles.markerText("litert=x qnn=2.50.0 arch=v79", sizes.map { (n, s) -> Triple(n, s, "ab") })
 
-    @Test fun runtimeExpectsTheFiveLibrariesOfThisArch() {
+    @Test fun runtimeExpectsTheSixLibrariesOfThisArch() {
         assertEquals(sizes.keys.toList(), NpuRuntimeFiles.expected(arch))
         assertEquals(sizes, NpuRuntimeFiles.recordedSizes(marker))
         assertTrue(NpuRuntimeFiles.recordedSizes("litert=x qnn=2.50.0 arch=v79\n").isEmpty())

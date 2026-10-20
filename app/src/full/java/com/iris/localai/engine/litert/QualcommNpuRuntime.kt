@@ -25,7 +25,7 @@ import java.util.zip.ZipFile
  *  - libQnnHtp / libQnnSystem / libQnnHtpV{arch}Stub / libQnnHtpV{arch}Skel — Qualcomm AI Engine
  *    Direct (QNN / QAIRT) 2.50.0 from Maven Central (com.qualcomm.qti:qnn-runtime:2.50.0,
  *    aliyun mirror as fallback), downloaded only after the user accepts Qualcomm's license.
- * Only the five files this SoC needs are kept (~28 MB); the downloaded archive is deleted.
+ * Only the six files this SoC needs are kept (~113 MB, incl. libQnnHtpPrepare); the downloaded archive is deleted.
  * 2.0: "installed" means all five are present, non-empty and match the sizes recorded in the
  * marker ([NpuRuntimeFiles.check]); otherwise the state is NeedsRepair and install() redoes it.
  */
@@ -90,7 +90,7 @@ class QualcommNpuRuntime private constructor(context: Context) : NpuSupport {
             for (name in NpuRuntimeFiles.expected(a).filter { it != NpuRuntimeFiles.DISPATCH }) {
                 extract(qnnAar, "jni/arm64-v8a/$name", tmp)
             }
-            // 2.0: record each library's size + SHA-256 (one pass over ~28 MB, install time only);
+            // 2.0: record each library's size + SHA-256 (one pass over ~113 MB, install time only);
             // isInstalled checks presence + size on every query.
             val recorded = NpuRuntimeFiles.expected(a).map { name ->
                 val f = File(tmp, name)

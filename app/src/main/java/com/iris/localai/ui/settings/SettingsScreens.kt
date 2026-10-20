@@ -628,7 +628,7 @@ private fun NpuRuntimeRow(
     val (subtitle, action) = when (val s = st) {
         is com.iris.localai.engine.NpuState.Unsupported -> s.reason to null
         com.iris.localai.engine.NpuState.NotInstalled ->
-            "$chip。运行 NPU 专用模型（文件名带芯片型号，如 _sm8750）所需；约 71 MB 下载，安装后占用约 28 MB" to ("下载" to install)
+            "$chip。运行 NPU 专用模型（文件名带芯片型号，如 _sm8750）所需；约 71 MB 下载，安装后占用约 113 MB" to ("下载" to install)
         is com.iris.localai.engine.NpuState.Downloading ->
             "正在下载 ${s.downloaded shr 20} / ${s.total shr 20} MB" to ("取消" to onCancel)
         com.iris.localai.engine.NpuState.Installed ->

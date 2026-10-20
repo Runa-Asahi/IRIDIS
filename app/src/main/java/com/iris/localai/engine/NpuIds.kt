@@ -116,11 +116,30 @@ object FirstReplyFallback {
  * non-empty (and, for markers written by 2.0+, has the size recorded at install time). A marker
  * left over a half-deleted or truncated directory used to report 已安装 and then fail at load.
  */
+/** 2.1.1: picks the NPU-relevant lines (QNN / LiteRT dispatch / FastRPC) out of a logcat dump. */
+object NpuLog {
+    private val KEYS = listOf("qnn", "htp", "dispatch", "adsprpc", "fastrpc", "cdsp", "rpcmem", "litert", "skel")
+    private val LEVEL = Regex("^[EWF]/")
+
+    fun relevant(lines: List<String>, max: Int): String =
+        lines.filter { l -> val low = l.lowercase(); KEYS.any { it in low } && (LEVEL.containsMatchIn(l) || "error" in low || "fail" in low) }
+            .map { it.trim().take(240) }
+            .distinct()
+            .takeLast(max)
+            .joinToString("\n")
+}
+
 object NpuRuntimeFiles {
     const val DISPATCH = "libLiteRtDispatch_Qualcomm.so"
+    /**
+     * 2.1.1: Google's LiteRT-LM NPU guide pushes libQnnHtpPrepare.so with the other QAIRT libraries;
+     * without it the Gemma 4 sm8750 graph failed prefill warm-up ("Failed to allocate tensors").
+     * Adds ~85 MB on disk; a runtime installed by 2.1.0 (five files) now reports 需要修复.
+     */
+    const val PREPARE = "libQnnHtpPrepare.so"
 
     fun expected(arch: Int): List<String> =
-        listOf(DISPATCH, "libQnnHtp.so", "libQnnSystem.so", "libQnnHtpV${arch}Stub.so", "libQnnHtpV${arch}Skel.so")
+        listOf(DISPATCH, "libQnnHtp.so", "libQnnSystem.so", "libQnnHtpV${arch}Stub.so", "libQnnHtpV${arch}Skel.so", PREPARE)
 
     sealed interface Check {
         data object Ok : Check
