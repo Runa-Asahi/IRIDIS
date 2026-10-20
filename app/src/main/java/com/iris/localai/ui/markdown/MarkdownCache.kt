@@ -70,7 +70,7 @@ class IncrementalMarkdown {
             val t = line.trim()
             val open = fence
             if (open != null) {
-                if (t.startsWith(open.take(3)) && t.all { it == open[0] }) fence = null
+                if (MarkdownParser.closesFence(line, open)) fence = null
                 continue
             }
             if (math) {

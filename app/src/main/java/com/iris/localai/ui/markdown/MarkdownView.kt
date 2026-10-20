@@ -75,8 +75,11 @@ fun Markdown(
     val blocks = remember(text, streaming) { if (streaming) incremental.parse(text) else MarkdownCache.get(text) }
     val c = Iris.colors
     val color = textColor ?: c.text
+    // 2.2: a finished reply that is one whole HTML document previews as a page (when 渲染网页代码 is on).
+    val wholeHtml = remember(text, streaming) { !streaming && HtmlBlocks.wholeDocument(text) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        blocks.forEach { Block(it, c, color) }
+        if (wholeHtml) HtmlCodeBlock(text.trim(), HtmlBlocks.Kind.HTML) { blocks.forEach { Block(it, c, color) } }
+        else blocks.forEach { Block(it, c, color) }
     }
 }
 
@@ -97,7 +100,11 @@ private fun Block(block: MdBlock, c: IrisColors, color: androidx.compose.ui.grap
             )
         }
         is MdBlock.Paragraph -> Text(rememberInline(block.text, c), style = body)
-        is MdBlock.Code -> CodeBlock(block, c)
+        is MdBlock.Code -> when (val kind = HtmlBlocks.kindOf(block)) {
+            null -> CodeBlock(block, c)
+            else -> HtmlCodeBlock(block.code, kind) { CodeBlock(block, c) }
+        }
+        is MdBlock.Image -> MarkdownImage(block)
         is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
             Box(Modifier.width(3.dp).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(c.outline))
             Column(Modifier.padding(start = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
