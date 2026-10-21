@@ -136,8 +136,14 @@ internal fun VoiceCapsuleButton(
     onHoldEnd: () -> Unit,
     onHoldCancel: () -> Unit,
     onCancelArmed: (Boolean) -> Unit,
+    /** 2.1.7: a reply is running — a long press on 发送 offers 「打断并发送」. */
+    generating: Boolean = false,
+    onInterruptSend: () -> Unit = {},
 ) {
     val c = Iris.colors
+    var interruptMenu by remember { mutableStateOf(false) }
+    val interruptNow by rememberUpdatedState(onInterruptSend)
+    val canInterrupt = generating && action == ComposerAction.SEND
     val reduce = LocalReduceMotion.current
     val haptics = com.iris.localai.ui.feedback.rememberIrisFeedback()
     val tapNow by rememberUpdatedState<() -> Unit> {
@@ -197,10 +203,23 @@ internal fun VoiceCapsuleButton(
                 contentDescription = VoiceCapsule.label(action)
                 onClick(VoiceCapsule.label(action)) { tapNow(); true }
             }
-            .pointerInput(action) {
+            .pointerInput(action, canInterrupt) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     pressed = true
+                    if (canInterrupt) {
+                        // 2.1.7: tap = 发送 (补充 / 「停…」), hold = the 「打断并发送」 menu.
+                        var up = false
+                        val held = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                            up = waitForUpOrCancellation()?.also { it.consume() } != null
+                        } == null
+                        pressed = false
+                        if (!held) { if (up) tapNow(); return@awaitEachGesture }
+                        haptics.perform(com.iris.localai.ui.feedback.FeedbackEvent.TICK)
+                        interruptMenu = true
+                        waitForUpOrCancellation()?.consume()
+                        return@awaitEachGesture
+                    }
                     if (!VoiceCapsule.canDictate(action)) {
                         val up = waitForUpOrCancellation()
                         pressed = false
@@ -243,6 +262,9 @@ internal fun VoiceCapsuleButton(
             },
         contentAlignment = Alignment.Center,
     ) {
+        com.iris.localai.ui.components.IrisMenu(expanded = interruptMenu && canInterrupt, onDismiss = { interruptMenu = false }) {
+            com.iris.localai.ui.components.IrisMenuItem(SendIntent.INTERRUPT_AND_SEND, IrisIcons.Stop) { interruptMenu = false; interruptNow() }
+        }
         val face = if (action == ComposerAction.VOICE && holding) -1 else action.ordinal
         AnimatedContent(targetState = face, transitionSpec = { motion(reduce) { IrisMotion.pop() } }, label = "capsuleFace") { f ->
             when (f) {

@@ -115,8 +115,9 @@ enum class ComposerAction { STOP, SEND, VOICE }
 /** 1.10.2: which round action shows (pure, unit-tested). */
 object ComposerActions {
     fun of(generating: Boolean, hasText: Boolean, hasAttachments: Boolean = false): ComposerAction = when {
-        generating -> ComposerAction.STOP
+        // 2.1.7: typing while a reply runs sends (a 补充, or 「停/等等…」 interrupts); empty = 停止.
         hasText || hasAttachments -> ComposerAction.SEND
+        generating -> ComposerAction.STOP
         else -> ComposerAction.VOICE
     }
 }
@@ -174,6 +175,8 @@ fun Composer(
     onHoldToTalkEnd: () -> Unit,
     onVoiceMode: () -> Unit,
     onResourceTier: (Int) -> Unit = {},
+    /** 2.1.7: long-press 发送 while generating → 「打断并发送」. */
+    onInterruptSend: () -> Unit = {},
     /** 1.10.1: tap on the greyed 思考 pill (the model has no thinking) — show a hint. */
     onThinkingUnsupported: () -> Unit = {},
     /** 1.9.0: 对话 ⇄ 智能体. */
@@ -350,6 +353,8 @@ fun Composer(
                 onSend = onSend,
                 onStop = onStop,
                 onCall = onVoiceMode,
+                generating = state.generating,
+                onInterruptSend = onInterruptSend,
                 onHoldStart = onHoldToTalkStart,
                 onHoldEnd = onHoldToTalkEnd,
                 onHoldCancel = onHoldToTalkCancel,

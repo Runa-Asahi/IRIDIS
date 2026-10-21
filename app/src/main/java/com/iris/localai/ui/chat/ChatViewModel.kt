@@ -562,10 +562,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
 
     // ------------------------------------------------------------------ messaging
 
-    fun send(text: String, attachments: List<com.iris.localai.data.Attachment> = emptyList(), refs: List<com.iris.localai.data.TurnRef> = emptyList()) {
+    fun send(
+        text: String,
+        attachments: List<com.iris.localai.data.Attachment> = emptyList(),
+        refs: List<com.iris.localai.data.TurnRef> = emptyList(),
+        /** 2.1.7: 「打断并发送」 — stop the running reply and answer this instead. */
+        interrupt: Boolean = false,
+    ) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() && attachments.isEmpty()) return
-        if (viewingOther() || busy()) return
+        if (viewingOther()) return
+        // 2.1.7: sending while a reply runs used to be dropped silently — now 「停/等等/不对…」 (or
+        // 「打断并发送」) stops it and starts a new turn; anything else is a queued 补充.
+        if (busy()) { sendWhileBusy(trimmed, attachments, refs, interrupt); return }
         // 2.2 「技能」: a picked skill / tool needs the agent — turn 智能体 on for it.
         if (com.iris.localai.data.TurnRefs.needsAgent(refs, c.agent.settings.current.agentMode)) { setAgentMode(true); notice.value = ComposerText.AGENT_FOR_REF }
         // 2.0.x: 「记住：…」 / "remember: …" is saved to MEMORY.md directly (both modes, no model call).
@@ -584,6 +593,61 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         }
         append(ChatMessage(role = Role.USER, content = trimmed, attachments = attachments, refs = refs.distinct()))
         startReply(Requester.CHAT)
+    }
+
+    // ------------------------------------------------------------------ 2.1.7 send while busy
+
+    private val sendQueue = SendQueue()
+    private val _queued = MutableStateFlow<List<QueuedMessage>>(emptyList())
+    /** Messages sent while a reply ran: answered right after it (chat) or read before the next step (智能体). */
+    val queued: StateFlow<List<QueuedMessage>> = _queued.asStateFlow()
+
+    fun cancelQueued(id: String) { _queued.value = sendQueue.cancel(id) }
+
+    private fun sendWhileBusy(text: String, attachments: List<com.iris.localai.data.Attachment>, refs: List<com.iris.localai.data.TurnRef>, force: Boolean) {
+        val convId = conversation.value.id
+        // Files / skills cannot wait in the text queue: they interrupt like 「打断并发送」.
+        if (force || attachments.isNotEmpty() || refs.isNotEmpty() || SendIntent.isInterrupt(text)) {
+            _queued.value = sendQueue.clear()
+            val job = genJob
+            stop()
+            viewModelScope.launch {
+                job?.join()
+                if (conversation.value.id != convId || viewingOther()) return@launch
+                // A stop that has not landed yet: wait a moment for the reply to wind down.
+                repeat(40) { if (busy()) kotlinx.coroutines.delay(50) }
+                if (busy()) { notice.value = "上一条回复还没停下，请稍后再发"; return@launch }
+                send(text, attachments, refs)
+            }
+            return
+        }
+        val forAgent = agentRunning
+        _queued.value = sendQueue.add(QueuedMessage(convId = convId, text = text, forAgent = forAgent))
+        notice.value = if (forAgent) "已记下补充：智能体下一步会看到（点按可取消）" else SendIntent.QUEUED_HINT
+    }
+
+    /** The 补充 the running 智能体 has not read yet → one note for its next step (also kept on the request). */
+    private fun takeAgentNotes(convId: String): String? {
+        val notes = sendQueue.takeAgentNotes(convId)
+        if (notes.isEmpty()) return null
+        _queued.value = sendQueue.all
+        val lastUser = conversation.value.messages.lastOrNull { it.role == Role.USER }
+        if (lastUser != null && conversation.value.id == convId) {
+            val add = notes.joinToString("\n") { "（补充）" + it.text.trim() }
+            conversation.update { conv -> conv.copy(messages = conv.messages.map { if (it.id == lastUser.id) it.copy(content = it.content.trimEnd() + "\n\n" + add) else it }) }
+            persist()
+        }
+        return SendIntent.agentNote(notes.map { it.text })
+    }
+
+    /** After a reply: the next queued message is answered as its own turn. */
+    private fun drainQueue() {
+        if (busy() || viewingOther()) return
+        val convId = conversation.value.id
+        _queued.value = sendQueue.retainOnly(convId)
+        val next = sendQueue.next(convId) ?: return
+        _queued.value = sendQueue.all
+        send(next.text)
     }
 
     /** 1.10.12: copies picked files into app storage (off the main thread). */
@@ -938,7 +1002,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
             }
         }
         genJob = job
-        job.invokeOnCompletion { viewModelScope.launch { if (genJob === job || genJob?.isActive != true) adoptViewing() } }
+        job.invokeOnCompletion {
+            viewModelScope.launch {
+                if (genJob === job || genJob?.isActive != true) adoptViewing()
+                // 2.1.7: answer what was queued while this reply ran.
+                if (genJob === job) drainQueue()
+            }
+        }
         return job
     }
 
@@ -1562,6 +1632,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
                 contextBudget = budget,
                 answerOf = { ThinkParser.parse(it, expectThinking = prefix.isNotEmpty()).answer },
                 runTool = { block -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { block() } },
+                // 2.1.7: 补充 typed during the run reach the model before its next step.
+                pendingNotes = { takeAgentNotes(convId) },
             )
             agentTranscript = null
             val o = loop.run(runBase)

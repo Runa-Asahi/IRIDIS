@@ -38,7 +38,8 @@ class V220ComposerTest {
         assertEquals(ComposerAction.SEND, ComposerActions.of(generating = false, hasText = true))
         assertEquals(ComposerAction.SEND, ComposerActions.of(generating = false, hasText = false, hasAttachments = true))
         // generating wins over text: the capsule is 停止
-        assertEquals(ComposerAction.STOP, ComposerActions.of(generating = true, hasText = true))
+        // 2.1.7: text while generating = 发送 (补充 / interrupt).
+        assertEquals(ComposerAction.SEND, ComposerActions.of(generating = true, hasText = true))
         assertEquals(ComposerAction.STOP, ComposerActions.of(generating = true, hasText = false))
     }
 

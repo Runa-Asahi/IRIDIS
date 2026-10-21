@@ -115,7 +115,8 @@ class V1102Test {
     }
 
     @Test fun roundActionFollowsTheOldRules() {
-        assertEquals(ComposerAction.STOP, ComposerActions.of(generating = true, hasText = true))
+        // 2.1.7: text while generating = 发送 (补充 / interrupt).
+        assertEquals(ComposerAction.SEND, ComposerActions.of(generating = true, hasText = true))
         assertEquals(ComposerAction.STOP, ComposerActions.of(generating = true, hasText = false))
         assertEquals(ComposerAction.SEND, ComposerActions.of(generating = false, hasText = true))
         assertEquals(ComposerAction.VOICE, ComposerActions.of(generating = false, hasText = false))

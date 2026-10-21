@@ -146,6 +146,7 @@ fun ChatScreen(
     // 1.9.0: 对话 / 智能体 and a tool waiting for the user's permission.
     val agentSettings by vm.agentSettings.collectAsStateWithLifecycle()
     val permissionAsk by vm.permissionAsk.collectAsStateWithLifecycle()
+    val queued by vm.queued.collectAsStateWithLifecycle()
     val backgroundRunId by vm.backgroundRunId.collectAsStateWithLifecycle()
     val apiStatus by ApiService.status.collectAsState()
     val drawer = rememberDrawerState(DrawerValue.Closed)
@@ -420,6 +421,12 @@ fun ChatScreen(
                                 }
                             }
                         }
+                        // 2.1.7: messages sent while a reply runs (补充), answered / read next; tap = cancel.
+                        items(queued.filter { it.convId == ui.conversation.id }, key = { "queued-" + it.id }) { q ->
+                            QueuedBubble(q, if (reduce) Modifier else Modifier.animateItem(fadeInSpec = IrisMotion.standard(), placementSpec = IrisMotion.Gentle.offset(), fadeOutSpec = IrisMotion.standard())) {
+                                vm.cancelQueued(q.id)
+                            }
+                        }
                     }
                 }
             }
@@ -566,6 +573,12 @@ fun ChatScreen(
                         editingId = null
                     },
                     onStop = vm::stop,
+                    // 2.1.7: long-press 发送 while generating → stop the reply, this is a new turn.
+                    onInterruptSend = {
+                        vm.send(input, pending, refs, interrupt = true); pending = emptyList(); refs = emptyList()
+                        feedback.perform(com.iris.localai.ui.feedback.FeedbackEvent.SEND)
+                        hideKeyboard(); input = ""; editingId = null
+                    },
                     onCancelEdit = { editingId = null; input = "" },
                     onToggleThinking = { vm.setDeepThinking(!ui.deepThinking) },
                     onHoldToTalkStart = { /* 1.13.1: keep the keyboard (user: 语音输入会中断键盘) */ withMic { listening = true; vm.dictation.warmLanguage = settings.asrLanguage; vm.dictation.start() } },
@@ -1021,3 +1034,30 @@ internal fun chatTopBarColor(page: androidx.compose.ui.graphics.Color, backgroun
 
 /** Same see-through level as cards over a custom background ([com.iris.localai.ui.theme.overBackdrop] surfaceElevated). */
 internal const val CHAT_TOP_BAR_BACKDROP_ALPHA = 0.88f
+
+/** 2.1.7: a message waiting to be answered (or read by the 智能体); tap cancels it. */
+@Composable
+private fun QueuedBubble(q: QueuedMessage, modifier: Modifier = Modifier, onCancel: () -> Unit) {
+    val c = com.iris.localai.ui.theme.Iris.colors
+    Box(modifier.fillMaxWidth().padding(start = 52.dp), contentAlignment = Alignment.CenterEnd) {
+        Column(horizontalAlignment = Alignment.End) {
+            Box(
+                Modifier
+                    .clip(com.iris.localai.ui.theme.IrisRadius.bubbleShape)
+                    .background(c.surfaceVariant.copy(alpha = 0.55f))
+                    .clickable(onClickLabel = "取消这条") { onCancel() }
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+            ) {
+                Text(q.text, style = com.iris.localai.ui.theme.IrisType.message, color = c.textSecondary)
+            }
+            Row(Modifier.padding(top = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(com.iris.localai.ui.icons.IrisIcons.Clock, null, tint = c.textTertiary, modifier = Modifier.size(12.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    (if (q.forAgent) SendIntent.QUEUED_AGENT_LABEL else SendIntent.QUEUED_LABEL) + " · 点按取消",
+                    style = com.iris.localai.ui.theme.IrisType.labelSmall, color = c.textTertiary,
+                )
+            }
+        }
+    }
+}
