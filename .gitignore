@@ -22,3 +22,6 @@ third_party/qnn-api/
 # never publish signing material
 /keystore/
 *.p12
+
+# Kotlin compiler session data
+.kotlin/
