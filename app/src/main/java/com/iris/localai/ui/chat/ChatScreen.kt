@@ -345,6 +345,12 @@ fun ChatScreen(
                     ChatEmptyState(
                         modelName = ui.readyModel?.displayName,
                         engine = ui.engine,
+                        // 2.1.7: tap the mark → 「默认模型」 (none set = last used).
+                        defaultModelName = remember(models, settings.defaultModelFile, settings.lastModelFile) {
+                            (models.firstOrNull { settings.defaultModelFile.isNotBlank() && it.fileName == settings.defaultModelFile }
+                                ?: models.firstOrNull { it.fileName == settings.lastModelFile })?.displayName
+                        },
+                        onLogoTap = vm::loadDefaultModel,
                         topPadding = with(density) { topBarHeight.toDp() },
                         bottomPadding = with(density) { composerHeight.toDp() },
                     ) { prompt -> input = prompt; runCatching { inputFocus.requestFocus() } }
@@ -873,6 +879,8 @@ private fun ChatEmptyState(
     engine: EngineState,
     topPadding: androidx.compose.ui.unit.Dp,
     bottomPadding: androidx.compose.ui.unit.Dp,
+    defaultModelName: String? = null,
+    onLogoTap: () -> Unit = {},
     onPrompt: (String) -> Unit,
 ) {
     val c = Iris.colors
@@ -893,11 +901,48 @@ private fun ChatEmptyState(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Icon(
-            painterResource(R.drawable.ic_iris_mark), null,
-            tint = c.text,
-            modifier = Modifier.size(44.dp).pulse(engine is EngineState.Loading, min = 0.35f, periodMs = 1100),
+        // 2.1.7: the mark loads 「默认模型」 when nothing is loaded: it breathes while loading
+        // (IrisMotion pulse), turns accent with a ✓ once ready, and the model name chip appears.
+        var logoTapped by remember { mutableStateOf(false) }
+        val ready = engine is EngineState.Ready
+        val markTint by androidx.compose.animation.animateColorAsState(
+            if (ready && logoTapped) c.accent else c.text, IrisMotion.Color.spec(), label = "logoTint",
         )
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                painterResource(R.drawable.ic_iris_mark), null,
+                tint = markTint,
+                modifier = Modifier
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .clickable(onClickLabel = if (ready) "当前模型" else "加载默认模型") { logoTapped = true; onLogoTap() }
+                    .padding(6.dp)
+                    .size(44.dp)
+                    .pulse(engine is EngineState.Loading, min = 0.35f, periodMs = 1100),
+            )
+            val badge by androidx.compose.animation.core.animateFloatAsState(
+                if (ready && logoTapped) 1f else 0f, IrisMotion.enter(), label = "logoCheck",
+            )
+            if (badge > 0.01f) {
+                Icon(
+                    com.iris.localai.ui.icons.IrisIcons.Check, "已加载",
+                    tint = c.onAccent,
+                    modifier = Modifier.align(Alignment.BottomEnd)
+                        .graphicsLayer { alpha = badge; scaleX = 0.6f + 0.4f * badge; scaleY = 0.6f + 0.4f * badge }
+                        .size(18.dp).clip(androidx.compose.foundation.shape.CircleShape).background(c.accent).padding(3.dp),
+                )
+            }
+        }
+        AnimatedVisibility(
+            visible = logoTapped && modelName != null,
+            enter = fadeIn(IrisMotion.enter()) + androidx.compose.animation.expandVertically(IrisMotion.enter()),
+            exit = fadeOut(IrisMotion.standard()) + androidx.compose.animation.shrinkVertically(IrisMotion.standard()),
+        ) {
+            Text(
+                modelName.orEmpty(), style = IrisType.labelSmall, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = IrisDimens.space8).clip(androidx.compose.foundation.shape.RoundedCornerShape(percent = 50))
+                    .background(c.surfaceVariant).padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
         Spacer(Modifier.height(IrisDimens.space20))
         Text("有什么可以帮你？", style = IrisType.display, color = c.text, textAlign = TextAlign.Center)
         // 1.14.5: with a model loaded the empty chat shows only the mark and the greeting
@@ -907,6 +952,7 @@ private fun ChatEmptyState(
             // 2.0.x: the breathing mark already says it; the activity line counts the seconds.
             engine is EngineState.Loading -> null
             engine is EngineState.Failed -> "模型加载失败，点击顶部重新选择"
+            defaultModelName != null -> "点按图标加载 $defaultModelName，或点击顶部选择"
             else -> "点击顶部选择一个本地模型"
         }
         if (hint != null) {

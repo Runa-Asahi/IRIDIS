@@ -134,6 +134,11 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     fun resetContext() = c.settings.resetContext()
     fun reloadModel() = viewModelScope.launch { c.engine.reload() }
 
+    /** 2.1.7 「默认模型」: installed models for the picker; "" = 上次使用的模型. */
+    val installedModels = c.models.models
+    fun refreshModels() = viewModelScope.launch { c.models.refresh() }
+    fun setDefaultModel(fileName: String) { update { it.copy(defaultModelFile = fileName) } }
+
     fun deleteAllConversations() = viewModelScope.launch { c.conversations.deleteAll() }
 
     // ---- voice packs ----

@@ -257,6 +257,8 @@ fun ModelBackendPage(vm: SettingsViewModel, onBack: () -> Unit, onModels: () -> 
                     subtitle = "打开 App 时就在后台加载上次用的模型，进入对话即可使用；关闭可省一点电和内存",
                 ) { on -> vm.update { it.copy(autoLoadLastModel = on) } }
                 Divider()
+                DefaultModelRow(vm, s.defaultModelFile)
+                Divider()
                 SettingsRow("立即重新加载模型", icon = com.iris.localai.ui.icons.IrisIcons.Reload, subtitle = "让需要重新加载才生效的修改马上生效", onClick = { vm.reloadModel() })
             }
 
@@ -962,6 +964,39 @@ fun DeveloperPage(vm: SettingsViewModel, onBack: () -> Unit, onOpen: (SettingsPa
             if (s.showStatusRack) {
                 SectionTitle("运行状态")
                 RuntimeRack(vm, onOpen)
+            }
+        }
+    }
+}
+
+/**
+ * 2.1.7 「默认模型」: what tapping the chat logo loads (also used when a message needs a model and
+ * none is loaded). 「上次使用的模型」 = the default ("" in settings).
+ */
+@Composable
+private fun DefaultModelRow(vm: SettingsViewModel, current: String) {
+    val models by vm.installedModels.collectAsStateWithLifecycle()
+    var open by remember { mutableStateOf(false) }
+    val name = models.firstOrNull { current.isNotBlank() && it.fileName == current }?.displayName
+    SettingsRow(
+        "默认模型", icon = com.iris.localai.ui.icons.IrisIcons.Cube,
+        subtitle = when {
+            current.isBlank() -> "上次使用的模型 · 点按对话页中间的图标即可加载"
+            name != null -> "$name · 点按对话页中间的图标即可加载"
+            else -> "已设置的模型不在了，将使用上次使用的模型"
+        },
+        onClick = { vm.refreshModels(); open = true },
+    )
+    if (open) {
+        com.iris.localai.ui.components.IrisSheet(onDismiss = { open = false }) {
+            com.iris.localai.ui.components.SheetHeader("默认模型")
+            com.iris.localai.ui.components.CheckRow("上次使用的模型", current.isBlank(), subtitle = "不指定，沿用上次加载的模型") {
+                vm.setDefaultModel(""); open = false
+            }
+            models.forEach { m ->
+                com.iris.localai.ui.components.CheckRow(m.displayName, current == m.fileName, subtitle = m.fileName) {
+                    vm.setDefaultModel(m.fileName); open = false
+                }
             }
         }
     }
