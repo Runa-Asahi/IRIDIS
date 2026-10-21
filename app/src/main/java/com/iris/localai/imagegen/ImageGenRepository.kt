@@ -35,12 +35,16 @@ object ImageGenFiles {
     fun modelDir(imagegenRoot: File, model: ImageModel): File = File(imagegenRoot, model.id)
 
     /**
-     * Downloaded = every listed file present with its size; for a repo resolved at download time
+     * Downloaded = every listed file present with its size (an archive counts once its [RemoteFile.unpacked]
+     * files are all in the model folder with their sizes — the zip itself is deleted); for a repo resolved at download time
      * ([ImageModel.files] empty, [ImageModel.hfRepo] set) a non-empty folder without `.part` leftovers.
      * Models waiting for the Hexagon runtime have no files yet, so never count as downloaded.
      */
     fun isDownloaded(imagegenRoot: File, model: ImageModel): Boolean {
-        if (model.files.isNotEmpty()) return model.files.all { File(imagegenRoot, it.path).let { f -> f.isFile && f.length() == it.size } }
+        if (model.files.isNotEmpty()) return model.files.all { rf ->
+            if (rf.isArchive) ImageDownloads.unpacked(imagegenRoot, model, rf)
+            else File(imagegenRoot, rf.path).let { f -> f.isFile && f.length() == rf.size }
+        }
         if (model.hfRepo == null) return false
         val files = modelDir(imagegenRoot, model).walkTopDown().filter { it.isFile }.toList()
         return files.isNotEmpty() && files.none { it.name.endsWith(".part") }
@@ -90,6 +94,15 @@ class ImageGenRepository(private val context: Context) {
         privateDir = privateModels,
         sub = ImageGenFiles.MODELS_SUB,
     )
+
+    /** Where a new download goes: the root that already holds a partial/complete copy, else the current write dir. */
+    fun downloadRoot(model: ImageModel): File {
+        val loc = modelsLocation()
+        return loc.listDirs.firstOrNull { ImageGenFiles.modelDir(it, model).exists() } ?: loc.dir
+    }
+
+    /** Every root a model folder may live in (for 删除). */
+    fun roots(): List<File> = modelsLocation().listDirs
 
     /** Ids of the models found complete in the shared or the private folder. */
     fun downloaded(): Set<String> {

@@ -24,6 +24,8 @@ class AppContainer(app: Application) {
     val models = ModelRepository(app)
     /** Whole-repository MNN model downloads (taobao-mnn) from Hugging Face / hf-mirror. */
     val mnnHub = com.iris.localai.data.MnnHub(models)
+    /** 2.1.7: 生图 model downloads (app scope, survive leaving the 生图 page). */
+    val imageGenDownloader = com.iris.localai.imagegen.ImageGenDownloader(scope)
     val conversations = ConversationRepository(File(app.filesDir, "conversations"))
     /** 1.7.1: per-model backend + parameters (null fields follow the global defaults). */
     val modelConfigs = com.iris.localai.data.ModelConfigRepository(app)

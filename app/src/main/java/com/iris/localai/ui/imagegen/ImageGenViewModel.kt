@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.iris.localai.imagegen.Backend
 import com.iris.localai.imagegen.DeviceProbe
 import com.iris.localai.imagegen.ImageCatalog
+import com.iris.localai.imagegen.ImageDl
 import com.iris.localai.imagegen.ImageGenEngine
 import com.iris.localai.imagegen.ImageGenRepository
 import com.iris.localai.imagegen.ImageModel
@@ -28,8 +29,11 @@ object ImageGenText {
     const val DOWNLOADED = "已下载"
     const val NOT_DOWNLOADED = "未下载"
     const val DOWNLOAD = "下载"
-    const val DOWNLOAD_PENDING = "下个版本接入下载"
-    const val NOT_DOWNLOADED_ERROR = "模型未下载（下载功能下个版本接入）"
+    const val NOT_DOWNLOADED_ERROR = "模型未下载，请先点「下载」"
+    const val EXTRACTING = "解压中"
+    const val DELETE = "删除"
+    const val DELETE_TITLE = "删除模型"
+    const val RETRY = "重试"
     const val PROMPT = "正向提示词"
     const val NEGATIVE = "反向提示词"
     const val REF_IMAGE = "参考图"
@@ -70,6 +74,8 @@ data class ImageGenUi(
     val result: String? = null,
     val history: List<String> = emptyList(),
     val report: String? = null,
+    /** Model id -> running / failed download (from [ImageGenDownloader.states]). */
+    val downloads: Map<String, ImageDl> = emptyMap(),
 ) {
     val model: ImageModel get() = ImageCatalog.byId(modelId) ?: ImageCatalog.SD15_QNN
     /** Reference image + 重绘强度 work everywhere except the fixed-size QNN context binary (txt2img only). */
@@ -92,7 +98,42 @@ class ImageGenViewModel(app: Application) : AndroidViewModel(app) {
 
     val catalog: List<ImageModel> get() = repo.catalog
 
-    init { refresh() }
+    private val container = (app as com.iris.localai.IrisApp).container
+    private val downloader = container.imageGenDownloader
+
+    init {
+        refresh()
+        viewModelScope.launch {
+            var before: Map<String, ImageDl> = emptyMap()
+            downloader.states.collect { st ->
+                _ui.update { it.copy(downloads = st) }
+                // a download that just left the map finished (or was cancelled): re-scan the folders
+                if (before.keys.any { it !in st }) refresh()
+                before = st
+            }
+        }
+    }
+
+    /** Starts (or resumes) [m]'s download in the app scope with the 下载源 from 设置. */
+    fun download(m: ImageModel) {
+        if (m.needsHexagonRuntime || m.files.isEmpty()) return
+        downloader.clearError(m.id)
+        viewModelScope.launch {
+            val root = withContext(Dispatchers.IO) { repo.downloadRoot(m) }
+            downloader.start(m, root, container.settings.current.downloadSource) { refresh() }
+        }
+    }
+
+    fun cancelDownload(m: ImageModel) { downloader.cancel(m.id); refresh() }
+
+    /** Deletes the model folder (complete or partial) after the page's confirm dialog. */
+    fun deleteModel(m: ImageModel) {
+        viewModelScope.launch {
+            val ok = downloader.delete(m, withContext(Dispatchers.IO) { repo.roots() })
+            if (!ok) _ui.update { it.copy(error = "删除失败") }
+            refresh()
+        }
+    }
 
     fun refresh() {
         viewModelScope.launch {

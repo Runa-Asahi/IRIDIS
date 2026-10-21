@@ -38,6 +38,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,9 +55,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.iris.localai.data.Format
+import com.iris.localai.imagegen.ImageDl
 import com.iris.localai.imagegen.ImageGenFiles
 import com.iris.localai.imagegen.ImageModel
 import com.iris.localai.imagegen.SelfCheck
+import com.iris.localai.ui.components.ConfirmDialog
 import com.iris.localai.ui.components.GroupFootnote
 import com.iris.localai.ui.components.IrisButton
 import com.iris.localai.ui.components.IrisButtonStyle
@@ -83,6 +88,16 @@ fun ImageGenScreen(onBack: () -> Unit, onSendToChat: (String) -> Unit, vm: Image
     val s by vm.ui.collectAsStateWithLifecycle()
     val context = LocalContext.current
     fun toast(t: String) = Toast.makeText(context, t, Toast.LENGTH_SHORT).show()
+    var deleting by remember { mutableStateOf<ImageModel?>(null) }
+    deleting?.let { m ->
+        ConfirmDialog(
+            title = ImageGenText.DELETE_TITLE,
+            message = "删除「${m.name}」的全部模型文件（含未下载完的部分）？",
+            confirmText = ImageGenText.DELETE,
+            onConfirm = { vm.deleteModel(m) },
+            onDismiss = { deleting = null },
+        )
+    }
     val pickRef = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let(vm::pickReference) }
 
     SubpageScaffold(ImageGenText.TITLE, onBack) {
@@ -100,7 +115,9 @@ fun ImageGenScreen(onBack: () -> Unit, onSendToChat: (String) -> Unit, vm: Image
                     horizontalArrangement = Arrangement.spacedBy(IrisDimens.space8),
                 ) {
                     for (m in vm.catalog) ModelChip(m, selected = m.id == s.modelId, downloaded = m.id in s.downloaded,
-                        onClick = { vm.selectModel(m) }, onDownload = { toast(ImageGenText.DOWNLOAD_PENDING) })
+                        dl = s.downloads[m.id],
+                        onClick = { vm.selectModel(m) }, onDownload = { vm.download(m) },
+                        onCancel = { vm.cancelDownload(m) }, onDelete = { deleting = m })
                 }
             }
 
@@ -231,7 +248,10 @@ private fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
 
 /** Tier/model chip: name, size, 已下载/未下载 + 下载; Hexagon models disabled with [SelfCheck.HEXAGON_PENDING]. */
 @Composable
-private fun ModelChip(m: ImageModel, selected: Boolean, downloaded: Boolean, onClick: () -> Unit, onDownload: () -> Unit) {
+private fun ModelChip(
+    m: ImageModel, selected: Boolean, downloaded: Boolean, dl: ImageDl?,
+    onClick: () -> Unit, onDownload: () -> Unit, onCancel: () -> Unit, onDelete: () -> Unit,
+) {
     val c = Iris.colors
     val enabled = !m.needsHexagonRuntime
     val alpha = if (enabled) 1f else 0.45f
@@ -251,11 +271,27 @@ private fun ModelChip(m: ImageModel, selected: Boolean, downloaded: Boolean, onC
         Spacer(Modifier.height(4.dp))
         if (!enabled) {
             Text("「${SelfCheck.HEXAGON_PENDING}」", style = IrisType.caption, color = c.textTertiary)
-        } else {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (downloaded) ImageGenText.DOWNLOADED else ImageGenText.NOT_DOWNLOADED, style = IrisType.caption,
-                    color = if (downloaded) c.success else c.textTertiary, modifier = Modifier.weight(1f))
-                if (!downloaded) IrisButton(ImageGenText.DOWNLOAD, onClick = onDownload, style = IrisButtonStyle.Text, compact = true, icon = IrisIcons.Download)
+        } else when (dl) {
+            is ImageDl.Downloading, is ImageDl.Extracting -> {
+                val frac = if (dl is ImageDl.Downloading) dl.fraction else (dl as ImageDl.Extracting).fraction
+                val label = if (dl is ImageDl.Downloading) "${Format.bytes(dl.done)} / ${Format.bytes(dl.total)}"
+                    else "${ImageGenText.EXTRACTING} ${(frac * 100).toInt()}%"
+                IrisProgressBar(frac, Modifier.fillMaxWidth().padding(vertical = 4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(label, style = IrisType.caption, color = c.textSecondary, modifier = Modifier.weight(1f), maxLines = 1)
+                    IrisButton(ImageGenText.CANCEL, onClick = onCancel, style = IrisButtonStyle.Text, compact = true, icon = IrisIcons.Close)
+                }
+            }
+            else -> {
+                if (dl is ImageDl.Failed) Text(dl.message, style = IrisType.caption, color = c.danger, maxLines = 3)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (downloaded) ImageGenText.DOWNLOADED else ImageGenText.NOT_DOWNLOADED, style = IrisType.caption,
+                        color = if (downloaded) c.success else c.textTertiary, modifier = Modifier.weight(1f))
+                    if (!downloaded) IrisButton(if (dl is ImageDl.Failed) ImageGenText.RETRY else ImageGenText.DOWNLOAD, onClick = onDownload,
+                        style = IrisButtonStyle.Text, compact = true, icon = IrisIcons.Download)
+                }
+                // 删除 also clears a partial download's leftovers
+                if (downloaded || dl is ImageDl.Failed) IrisButton(ImageGenText.DELETE, onClick = onDelete, style = IrisButtonStyle.Text, compact = true, icon = IrisIcons.Trash)
             }
         }
     }

@@ -29,8 +29,12 @@ class ImageCatalogTest {
     @Test fun sd15Qnn() {
         val m = assertNotNullAnd(ImageCatalog.byId("sd15-qnn"))
         assertEquals(Tier.LOW, m.tier); assertEquals(Backend.QNN, m.backend)
-        assertEquals(1, m.files.size); assertEquals(709785222L, m.files[0].size)
-        assertTrue(m.files[0].url.endsWith("qualcomm_snapdragon_8_elite_for_galaxy.zip"))
+        val zip = m.files.single { it.isArchive }
+        assertEquals(709785222L, zip.size)
+        assertTrue(zip.url.endsWith("qualcomm_snapdragon_8_elite_for_galaxy.zip"))
+        assertTrue(zip.path.startsWith("sd15-qnn/.part/"))
+        assertEquals(setOf("text_encoder.bin", "unet.bin", "vae.bin", "metadata.json"), zip.unpacked.map { it.path }.toSet())
+        assertEquals(setOf("sd15-qnn/tokenizer/vocab.json", "sd15-qnn/tokenizer/merges.txt"), m.files.filter { !it.isArchive }.map { it.path }.toSet())
         assertEquals(512, m.fixedSize); assertEquals(20, m.defaultSteps); assertEquals(7.5f, m.defaultCfg, 0f)
         val mnn = assertNotNullAnd(ImageCatalog.byId("sd15-mnn"))
         assertEquals(Backend.MNN_CPU, mnn.backend); assertEquals(512, mnn.fixedSize)

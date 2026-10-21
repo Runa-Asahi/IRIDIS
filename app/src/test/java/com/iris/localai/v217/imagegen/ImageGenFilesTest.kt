@@ -65,18 +65,25 @@ class ImageGenFilesTest {
         val root = tmp()
         val qnn = ImageCatalog.SD15_QNN
         assertFalse(ImageGenFiles.isDownloaded(root, qnn))
-        val rf = qnn.files.single()
-        val f = File(root, rf.path).apply { parentFile!!.mkdirs(); writeBytes(ByteArray(10)) }
-        assertFalse("size must match", ImageGenFiles.isDownloaded(root, qnn))
-        java.io.RandomAccessFile(f, "rw").use { it.setLength(rf.size) }
-        assertTrue(ImageGenFiles.isDownloaded(root, qnn))
         assertEquals(File(root, "sd15-qnn"), ImageGenFiles.modelDir(root, qnn))
+        fun sized(f: File, n: Long) { f.parentFile!!.mkdirs(); java.io.RandomAccessFile(f, "rw").use { it.setLength(n) } }
+        for (rf in qnn.files.filter { !it.isArchive }) sized(File(root, rf.path), rf.size)
+        val zip = qnn.files.single { it.isArchive }
+        sized(File(root, zip.path), zip.size)
+        assertFalse("the zip alone is not a model", ImageGenFiles.isDownloaded(root, qnn))
+        for (u in zip.unpacked) sized(File(root, "sd15-qnn/${u.path}"), u.size)
+        File(root, zip.path).delete()
+        assertTrue(ImageGenFiles.isDownloaded(root, qnn))
+        sized(File(root, "sd15-qnn/unet.bin"), 10)
+        assertFalse("size must match", ImageGenFiles.isDownloaded(root, qnn))
 
         val mnn = ImageCatalog.SD15_MNN
         assertFalse(ImageGenFiles.isDownloaded(root, mnn))
-        File(root, "sd15-mnn/unet.mnn.part").apply { parentFile!!.mkdirs(); writeText("x") }
-        assertFalse(ImageGenFiles.isDownloaded(root, mnn))
-        File(root, "sd15-mnn/unet.mnn.part").renameTo(File(root, "sd15-mnn/unet.mnn"))
+        val last = mnn.files.last()
+        for (rf in mnn.files.dropLast(1)) sized(File(root, rf.path), rf.size)
+        sized(File(root, last.path + ".part"), last.size)
+        assertFalse("still a .part", ImageGenFiles.isDownloaded(root, mnn))
+        File(root, last.path + ".part").renameTo(File(root, last.path))
         assertTrue(ImageGenFiles.isDownloaded(root, mnn))
 
         File(root, "flux2-klein-4b/x").apply { parentFile!!.mkdirs(); writeText("x") }
@@ -84,7 +91,8 @@ class ImageGenFilesTest {
     }
 
     @Test fun sizes() {
-        assertEquals(709_785_222L, ImageGenFiles.sizeBytes(ImageCatalog.SD15_QNN))
-        assertNull(ImageGenFiles.sizeBytes(ImageCatalog.SD15_MNN))
+        assertEquals(709_785_222L + 1_059_962L + 524_619L, ImageGenFiles.sizeBytes(ImageCatalog.SD15_QNN))
+        assertEquals(1_154_788_884L, ImageGenFiles.sizeBytes(ImageCatalog.SD15_MNN))
+        assertNull(ImageGenFiles.sizeBytes(ImageCatalog.FLUX2_KLEIN))
     }
 }
