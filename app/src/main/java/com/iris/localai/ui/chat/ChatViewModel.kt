@@ -570,6 +570,22 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
             }
         }
 
+    /** 2.1.7 生图 「发到聊天」: a PNG path waiting to join the composer's attachments (ChatScreen consumes it). */
+    private val _incomingImage = MutableStateFlow<String?>(null)
+    val incomingImage: StateFlow<String?> = _incomingImage.asStateFlow()
+    fun attachGeneratedImage(path: String) { _incomingImage.value = path }
+    fun consumeIncomingImage() { _incomingImage.value = null }
+
+    /** Copies a local image (a 生图 result) into app attachments, like a picked photo. */
+    suspend fun importLocalImage(path: String): com.iris.localai.data.Attachment? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            val src = java.io.File(path)
+            val out = java.io.File(com.iris.localai.util.Attachments.dir(getApplication()), java.util.UUID.randomUUID().toString().take(8) + "-" + src.name)
+            src.copyTo(out, overwrite = true)
+            com.iris.localai.data.Attachment(name = src.name, path = out.path, mime = "image/png", sizeBytes = out.length(), kind = com.iris.localai.data.AttachmentKind.IMAGE)
+        }.onFailure { notice.value = "无法附加图片：${it.message}" }.getOrNull()
+    }
+
     fun discardAttachments(list: List<com.iris.localai.data.Attachment>) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { com.iris.localai.util.Attachments.delete(list) }
     }

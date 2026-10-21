@@ -67,7 +67,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 
 /** Top-level destinations. A tiny back stack is enough for this app's shallow navigation. */
-private enum class Route { APPEARANCE, CHAT, MODELS, SETTINGS, GENERATION, VOICE, API, ABOUT, DIAGNOSTICS, MODEL_BACKEND, CONTEXT, PERFORMANCE, TIER_PROFILES, AGENT, MEMORY, TERMINAL, BROWSER, FILES, STORAGE, DEVELOPER }
+private enum class Route { APPEARANCE, CHAT, MODELS, SETTINGS, GENERATION, VOICE, API, ABOUT, DIAGNOSTICS, MODEL_BACKEND, CONTEXT, PERFORMANCE, TIER_PROFILES, AGENT, MEMORY, TERMINAL, BROWSER, FILES, STORAGE, DEVELOPER, IMAGEGEN }
 
 class MainActivity : ComponentActivity() {
 
@@ -252,7 +252,9 @@ private fun Screen(r: Route, chat: ChatViewModel, settingsVm: SettingsViewModel,
             onOpenApi = { push(Route.API) },
             onOpenFiles = { push(Route.FILES) },
             onOpenTerminal = { push(Route.TERMINAL) },
+            onOpenImageGen = { push(Route.IMAGEGEN) },
         )
+        Route.IMAGEGEN -> com.iris.localai.ui.imagegen.ImageGenScreen(onBack = pop, onSendToChat = { path -> chat.attachGeneratedImage(path); pop() })
         Route.MODELS -> ModelsScreen(onBack = pop)
         Route.APPEARANCE -> com.iris.localai.ui.settings.AppearancePage(settingsVm, onBack = pop)
         Route.SETTINGS -> SettingsHome(

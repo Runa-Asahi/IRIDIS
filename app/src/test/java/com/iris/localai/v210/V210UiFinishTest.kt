@@ -53,8 +53,8 @@ class V210UiFinishTest {
 
     @Test fun drawerNavIsOneRowOfIrisIcons() {
         val d = src("ui/chat/HistoryDrawer.kt")
-        assertEquals(5, Regex("DrawerNavButton\\(com\\.iris\\.localai\\.ui\\.icons\\.IrisIcons\\.").findAll(d).count())
-        for (dest in listOf("onModels", "onFiles", "onTerminal", "onApi", "onSettings")) assertTrue(dest, d.contains("onClick = $dest)"))
+        assertEquals(6, Regex("DrawerNavButton\\(com\\.iris\\.localai\\.ui\\.icons\\.IrisIcons\\.").findAll(d).count())
+        for (dest in listOf("onModels", "onImageGen", "onFiles", "onTerminal", "onApi", "onSettings")) assertTrue(dest, d.contains("onClick = $dest)"))
         assertFalse(d.contains("Icons.Outlined.Settings"))
         assertFalse(d.contains("NavRow(com.iris.localai.ui.icons.IrisIcons.Cube"))
     }

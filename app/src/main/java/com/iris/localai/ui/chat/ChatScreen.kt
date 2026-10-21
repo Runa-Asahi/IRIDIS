@@ -115,6 +115,7 @@ fun ChatScreen(
     onOpenSettings: () -> Unit,
     onOpenFiles: () -> Unit = {},
     onOpenTerminal: () -> Unit = {},
+    onOpenImageGen: () -> Unit = {},
     onOpenVoiceSettings: () -> Unit,
     onOpenApi: () -> Unit,
 ) {
@@ -170,6 +171,14 @@ fun ChatScreen(
         }
     }
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { addPicked(it) }
+    // 2.1.7 生图 「发到聊天」: the generated PNG joins the composer's attachments.
+    val incomingImage by vm.incomingImage.collectAsStateWithLifecycle()
+    LaunchedEffect(incomingImage) {
+        val path = incomingImage ?: return@LaunchedEffect
+        vm.consumeIncomingImage()
+        if (pending.size >= com.iris.localai.util.Attachments.MAX_PER_MESSAGE) { vm.showNotice("每条消息最多 ${com.iris.localai.util.Attachments.MAX_PER_MESSAGE} 个附件"); return@LaunchedEffect }
+        vm.importLocalImage(path)?.let { pending = pending + it }
+    }
     // 1.10.13: 照片 opens the system photo picker (no storage permission needed).
     val pickPhotos = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(com.iris.localai.util.Attachments.MAX_PER_MESSAGE),
@@ -245,6 +254,7 @@ fun ChatScreen(
                 onApi = { scope.launch { drawer.close() }; onOpenApi() },
                 onFiles = { scope.launch { drawer.close() }; onOpenFiles() },
                 onTerminal = { scope.launch { drawer.close() }; onOpenTerminal() },
+                onImageGen = { scope.launch { drawer.close() }; onOpenImageGen() },
                 runningId = backgroundRunId,
                 open = drawer.targetValue == DrawerValue.Open,
             )
