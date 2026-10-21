@@ -203,6 +203,12 @@ fun AgentStepCard(step: AgentStep, streaming: Boolean) {
                 modifier = Modifier.padding(start = 24.dp, top = 2.dp),
             )
         }
+        // 2.1.7: pictures the step made (generate_image), tap → full-screen viewer.
+        if (step.images.isNotEmpty()) {
+            Row(Modifier.padding(start = 24.dp, top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                step.images.take(4).forEach { com.iris.localai.ui.markdown.ImageThumbnail(it) }
+            }
+        }
         if (plan != null) com.iris.localai.ui.components.Fold(open) {
             Column(Modifier.padding(top = 6.dp).fillMaxWidth()) {
                 if (plan.title.isNotBlank()) Text(plan.title, style = IrisType.labelSmall, color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis)

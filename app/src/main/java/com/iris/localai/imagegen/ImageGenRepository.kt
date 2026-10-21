@@ -115,3 +115,24 @@ class ImageGenRepository(private val context: Context) {
             .sortedByDescending { it.name }
     }
 }
+
+/**
+ * 2.1.7: generate_image's view of 生图 — downloaded models that can run (not waiting for the Hexagon
+ * runtime), the engine, and saving into the workspace.
+ */
+class RepositoryImageGenBackend(
+    private val repo: ImageGenRepository,
+    private val engine: ImageGenEngine = StubEngine(),
+) : com.iris.localai.agent.ImageGenBackend {
+    override fun runnableModels(): List<ImageModel> {
+        val dl = runCatching { repo.downloaded() }.getOrDefault(emptySet())
+        return repo.catalog.filter { it.id in dl && !it.needsHexagonRuntime }
+    }
+
+    override suspend fun generate(req: ImageRequest, model: ImageModel, onProgress: (step: Int, total: Int) -> Unit): Result<ByteArray> =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { engine.generate(req, model, onProgress) }
+
+    override fun save(png: ByteArray, req: ImageRequest, model: ImageModel): File = repo.save(png, req, model)
+
+    override fun cancel() = engine.cancel()
+}

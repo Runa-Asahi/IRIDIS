@@ -1363,7 +1363,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         val prefix = if (details?.thinkingPrefilled == true && !disableThinking) "<think>" else ""
         val history = c.agent.history
         val memoryOn = c.agent.memorySettings.current.enabled
-        val tools = com.iris.localai.agent.AgentTools.enabled(ag, history != null, memoryOn, c.agent.knowledge.nonEmptyCached())
+        val tools = com.iris.localai.agent.AgentTools.enabled(ag, history != null, memoryOn, c.agent.knowledge.nonEmptyCached(), c.agent.imageGenOnCached())
         val ctxTokens = details?.contextLength?.takeIf { it > 0 } ?: eff.contextLength
         val maxNew = minOf(eff.maxNewTokens, AGENT_MAX_NEW)
         val sampling = c.engine.samplingFor(disableThinking).copy(maxNewTokens = maxNew, contextShift = false)
@@ -1549,7 +1549,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
             _permissionAsk.value?.let { it.answer.cancel(); _permissionAsk.value = null }
             timer.finish()
             val o = outcome
-            val finalText = (o?.finalText ?: (_stream.value?.text ?: "")).trim()
+            // 2.1.7: pictures made by generate_image join the reply as ![](images/IMG_….png) (unless already shown).
+            val finalText = com.iris.localai.agent.StepImages.appendTo((o?.finalText ?: (_stream.value?.text ?: "")).trim(), steps)
             val finalSteps = steps.map { st ->
                 if (st.status == com.iris.localai.agent.StepStatus.RUNNING || st.status == com.iris.localai.agent.StepStatus.ASKING)
                     st.copy(status = com.iris.localai.agent.StepStatus.ERROR, result = if (cancelled) "已停止" else "未完成")
@@ -1637,7 +1638,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         if (t != null && t.convId == conv.id && conv.messages.lastOrNull()?.id == t.anchorId) return t.messages
         val ag = c.agent.settings.current
         val memoryOn = c.agent.memorySettings.current.enabled
-        val tools = com.iris.localai.agent.AgentTools.enabled(ag, c.agent.history != null, memoryOn, c.agent.knowledge.nonEmptyCached())
+        val tools = com.iris.localai.agent.AgentTools.enabled(ag, c.agent.history != null, memoryOn, c.agent.knowledge.nonEmptyCached(), c.agent.imageGenOnCached())
         val eff = c.engine.effective()
         val maxNew = minOf(eff.maxNewTokens, AGENT_MAX_NEW)
         freezeMemory(agentMode = true)

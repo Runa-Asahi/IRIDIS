@@ -20,6 +20,8 @@ enum class ToolGroup(val title: String, val label: String, val hint: String) {
     TASKS("Tasks", "定时", ""),
     MEMORY("Memory", "记忆", "use recall for older turns"),
     SKILLS("Skills", "技能", ""),
+    /** 2.1.7: on-device image generation (generate_image). No hint: listed under "Other" in the prompt. */
+    IMAGE("Image", "生图", ""),
     OTHER("Other", "其他", ""),
 }
 
@@ -38,6 +40,8 @@ data class ToolResult(
     val summary: String,
     /** 2.1.0: the plan after a `plan` call, for the step card (never sent to the model). */
     val plan: Plan? = null,
+    /** 2.1.7: workspace-relative pictures the tool made (generate_image), shown on the step card. */
+    val images: List<String> = emptyList(),
 )
 
 /** Everything a tool touches, injected so the tools stay testable on the JVM. */
@@ -93,6 +97,8 @@ class ToolEnv(
     val enabledTools: List<AgentTool> = emptyList(),
     /** 2.1.0: the knowledge folder for kb_search (null = empty / not available). */
     val knowledge: KnowledgeSearch? = null,
+    /** 2.1.7: on-device image generation for generate_image (null = not available → "no model" error). */
+    val imageGen: ImageGenBackend? = null,
 )
 
 /** 1.12.0: one stand-alone model call (no chat history), used by process_file. */
@@ -508,12 +514,113 @@ object WebFetchTool : AgentTool {
     }
 }
 
+/** 2.1.7: what generate_image needs from 生图 (the repository + engine), injected so the tool stays JVM-testable. */
+interface ImageGenBackend {
+    /** Downloaded models that can run here, in catalog order. */
+    fun runnableModels(): List<com.iris.localai.imagegen.ImageModel>
+    suspend fun generate(
+        req: com.iris.localai.imagegen.ImageRequest, model: com.iris.localai.imagegen.ImageModel,
+        onProgress: (step: Int, total: Int) -> Unit,
+    ): Result<ByteArray>
+    /** Saves the PNG (workspace `images/IMG_….png`) and returns the file. */
+    fun save(png: ByteArray, req: com.iris.localai.imagegen.ImageRequest, model: com.iris.localai.imagegen.ImageModel): File
+    /** Stops a running [generate] (called when the agent run is stopped). */
+    fun cancel() {}
+}
+
+/**
+ * 2.1.7 `generate_image`: on-device text-to-image / image-to-image through the 生图 runtime.
+ * The reference image must be a file inside the workspace sandbox; the result is saved as
+ * `images/IMG_….png` and returned both in the text and in [ToolResult.images].
+ */
+object GenerateImageTool : SuspendTool {
+    override val group = ToolGroup.IMAGE
+    override val name = "generate_image"
+    override val label = "生图"
+    override val description = "用本机模型生成或修改图片（约 1 分钟），保存到工作区 images/"
+    // 2.1.7: negative_prompt, seed, strength, width, height, steps, cfg are accepted but not advertised (prompt budget).
+    override val promptLine = "generate_image(prompt, image?): on-device picture; image=workspace path to edit"
+    override val risk = ToolRisk.WRITE
+    /** Only ever creates a new file (never overwrites), so it runs without asking. */
+    override val defaultPermission: Permission get() = Permission.ALLOW
+
+    const val NO_MODEL = "没有可用的生图模型：请在侧栏「生图」下载并运行自检"
+
+    /** The parsed call; [image] is still the workspace-relative path the model gave. */
+    data class Parsed(
+        val prompt: String, val negative: String, val width: Int?, val height: Int?, val steps: Int?,
+        val cfg: Float?, val seed: Long, val image: String?, val strength: Float,
+    )
+
+    private fun num(args: JsonObject, vararg keys: String): Double? = Args.str(args, *keys)?.trim()?.takeIf { it.isNotEmpty() }?.toDoubleOrNull()
+
+    /** Lenient parsing: aliases, numbers as strings, blanks = absent. Throws for a missing prompt. */
+    fun parse(args: JsonObject): Parsed {
+        val prompt = Args.str(args, "prompt", "text", "description", "query")?.trim()?.takeIf { it.isNotEmpty() }
+            ?: throw IllegalArgumentException("缺少参数 prompt")
+        return Parsed(
+            prompt = prompt,
+            negative = Args.str(args, "negative_prompt", "negative", "neg")?.trim().orEmpty(),
+            width = num(args, "width", "w")?.toInt(),
+            height = num(args, "height", "h")?.toInt(),
+            steps = num(args, "steps")?.toInt(),
+            cfg = num(args, "cfg", "cfg_scale", "guidance")?.toFloat(),
+            seed = num(args, "seed")?.toLong()?.takeIf { it >= 0 } ?: -1L,
+            image = Args.str(args, "image", "init_image", "image_path", "path")?.trim()?.takeIf { it.isNotEmpty() },
+            strength = num(args, "strength", "denoise", "denoising_strength")?.toFloat() ?: 0.75f,
+        )
+    }
+
+    /** The reference image as a file inside the sandbox (throws [SandboxException] outside it). */
+    fun resolveImage(path: String, env: ToolEnv): File = env.sandbox.resolve(path)
+
+    /** Builds the normalized request for [model] (model defaults where the call left a value out). */
+    fun request(p: Parsed, model: com.iris.localai.imagegen.ImageModel, initImage: String?): com.iris.localai.imagegen.ImageRequest =
+        com.iris.localai.imagegen.ImageRequest(
+            prompt = p.prompt, negative = p.negative,
+            width = p.width ?: model.fixedSize ?: 512, height = p.height ?: model.fixedSize ?: 512,
+            steps = p.steps ?: model.defaultSteps, cfg = p.cfg ?: model.defaultCfg, seed = p.seed,
+            initImagePath = initImage, strength = p.strength,
+        ).normalize(model)
+
+    override suspend fun runSuspend(args: JsonObject, env: ToolEnv, progress: (String) -> Unit): ToolResult {
+        val p = parse(args)
+        val init: File? = p.image?.let { path ->
+            val f = resolveImage(path, env)
+            if (!f.isFile) return notFound(path, env)
+            f
+        }
+        val models = env.imageGen?.runnableModels().orEmpty()
+        if (models.isEmpty()) return ToolResult(false, "Error: $NO_MODEL", NO_MODEL.substringBefore('：'))
+        // A reference image needs a model that takes one (not the fixed-size NPU context binary).
+        val model = if (init != null) models.firstOrNull { it.backend != com.iris.localai.imagegen.Backend.QNN }
+            ?: return ToolResult(false, "Error: the available image model cannot edit a picture; call without image", "该模型暂不支持参考图")
+        else models.first()
+        val backend = env.imageGen!!
+        val req = request(p, model, init?.path)
+        progress("生成中…")
+        val png = try {
+            backend.generate(req, model) { step, total -> progress("生成中 $step/$total") }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            backend.cancel(); throw e
+        }.getOrElse { e -> return ToolResult(false, "Error: image generation failed: ${e.message ?: e.javaClass.simpleName}", (e.message ?: "生图失败").take(40)) }
+        val file = backend.save(png, req, model)
+        val rel = if (env.sandbox.inside(file.canonicalFile)) env.sandbox.relative(file) else file.path
+        return ToolResult(
+            true,
+            "saved: $rel (seed ${req.seed}, ${req.width}x${req.height})",
+            "已保存 $rel",
+            images = listOf(rel),
+        )
+    }
+}
+
 /** Registry of the core tools (1.9.0 + 1.10.0 recall / memory), in settings / prompt order. */
 object AgentTools {
     val all: List<AgentTool> = listOf(
         ReadFileTool, WriteFileTool, EditFileTool, ListDirTool, SearchFilesTool, MoveFileTool, DeleteFileTool, ProcessFileTool,
         PlanTool, CalculatorTool, DateTimeTool, RecallTool, MemoryTool, WebSearchTool, WebFetchTool, BrowserTool, RunCommandTool,
-        PhoneTool, ScheduleTool, SkillTool, ActivateTool,
+        PhoneTool, ScheduleTool, SkillTool, GenerateImageTool, ActivateTool,
     )
 
     /**
@@ -528,8 +635,12 @@ object AgentTools {
      * 1.12.0: the tools of one agent reply — enabled in settings, minus those whose backing is
      * missing (recall without the history database, memory while memory is off).
      */
-    fun enabled(s: AgentSettings, historyAvailable: Boolean, memoryOn: Boolean, knowledgeOn: Boolean = false): List<AgentTool> =
-        all.filter { s.isEnabled(it) }.filter { (it.name != RecallTool.name || historyAvailable) && (it.name != MemoryTool.name || memoryOn) } +
+    fun enabled(s: AgentSettings, historyAvailable: Boolean, memoryOn: Boolean, knowledgeOn: Boolean = false, imageGenOn: Boolean = false): List<AgentTool> =
+        all.filter { s.isEnabled(it) }.filter {
+            (it.name != RecallTool.name || historyAvailable) && (it.name != MemoryTool.name || memoryOn) &&
+                // 2.1.7: generate_image only while a runnable image model is downloaded (no prompt cost otherwise).
+                (it.name != GenerateImageTool.name || imageGenOn)
+        } +
             (if (knowledgeOn) listOf(KbSearchTool) else emptyList())
 }
 

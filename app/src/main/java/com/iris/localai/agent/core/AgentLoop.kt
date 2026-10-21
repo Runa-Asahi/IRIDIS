@@ -28,7 +28,22 @@ data class AgentStep(
     val title: String = "",
     /** 2.1.0: the plan after a `plan` step, drawn as a checklist (never from [detail]). */
     val plan: Plan? = null,
+    /** 2.1.7: workspace-relative pictures the step made (generate_image), drawn as thumbnails. */
+    val images: List<String> = emptyList(),
 )
+
+/** 2.1.7: pictures of a reply's steps, appended to its text as markdown images. Pure. */
+object StepImages {
+    fun of(steps: List<AgentStep>): List<String> = steps.flatMap { it.images }.distinct()
+
+    /** [text] plus `![](path)` for each step image the text does not mention yet. */
+    fun appendTo(text: String, steps: List<AgentStep>): String {
+        val missing = of(steps).filter { !text.contains(it) }
+        if (missing.isEmpty()) return text
+        val md = missing.joinToString("\n") { "![]($it)" }
+        return if (text.isBlank()) md else "$text\n\n$md"
+    }
+}
 
 /**
  * The system prompt for 智能体 mode: compact (2.3: ≤ 600 estimated tokens with every tool on),
@@ -344,7 +359,7 @@ class AgentLoop(
                             if (result.ok && tool.risk == ToolRisk.MEMORY) callbacks.onMemoryChanged()
                         }
                     }
-                    update(step.copy(result = result.summary, status = status, detail = result.output, plan = result.plan))
+                    update(step.copy(result = result.summary, status = status, detail = result.output, plan = result.plan, images = result.images))
                     // 1.10.6: the model's own text (cut at the end of its call), not a rewritten
                     // canonical block: it matches what the engine decoded, so the KV cache is kept.
                     msgs += PromptMessage(PromptMessage.ASSISTANT, rawCall(answer, call))
