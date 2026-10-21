@@ -1,5 +1,8 @@
 package com.iris.localai.ui.chat
 
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -98,6 +101,21 @@ object VoiceCapsule {
 
     /** [upPx] = how far the finger moved up from where it went down (px). */
     fun cancelArmed(upPx: Float, density: Float): Boolean = upPx >= CANCEL_DRAG_DP * density
+
+    /**
+     * 2.1.7: how far the finger slid up ON SCREEN (px) since the long-press began. Pointer positions
+     * are local to the capsule, so when the layout moves under a still finger (the soft keyboard
+     * hides and the composer drops 300 px) the local y changes although the finger did not move —
+     * that used to read as an upward slide and cancel the dictation. Adding the capsule's own
+     * position in the window ([startOriginY] at the press, [originY] now) turns both into window
+     * coordinates, so a layout shift alone is 0.
+     */
+    fun slideUpPx(startFingerY: Float, startOriginY: Float, fingerY: Float, originY: Float): Float =
+        (startOriginY + startFingerY) - (originY + fingerY)
+
+    /** [slideUpPx] + [cancelArmed]: the decision the long-press loop makes on every pointer event. */
+    fun cancelArmed(startFingerY: Float, startOriginY: Float, fingerY: Float, originY: Float, density: Float): Boolean =
+        cancelArmed(slideUpPx(startFingerY, startOriginY, fingerY, originY), density)
 }
 
 /**
@@ -153,8 +171,11 @@ internal fun VoiceCapsuleButton(
         while (true) { ring.snapTo(0f); ring.animateTo(1f, IrisMotion.loop(IrisMotion.PULSE_PERIOD_MS * 2)) }
     }
     val shape = IrisRadius.pillShape
+    // 2.1.7: the capsule's top in window coordinates (a layout shift moves it; see VoiceCapsule.slideUpPx).
+    val originY = remember { floatArrayOf(0f) }
     Box(
         Modifier
+            .onGloballyPositioned { originY[0] = it.positionInWindow().y }
             .size(VoiceCapsule.WIDTH_DP.dp, VoiceCapsule.HEIGHT_DP.dp)
             .drawBehind {
                 if (holding && ring.value > 0f) {
@@ -196,6 +217,7 @@ internal fun VoiceCapsuleButton(
                     com.iris.localai.ui.feedback.FeedbackVoice.dictating = true
                     haptics.perform(com.iris.localai.ui.feedback.FeedbackEvent.LISTEN_START)
                     start()
+                    val startOrigin = originY[0]
                     var isArmed = false
                     var done = false
                     try {
@@ -203,7 +225,8 @@ internal fun VoiceCapsuleButton(
                             val e = awaitPointerEvent()
                             e.changes.forEach { it.consume() }
                             val ch = e.changes.firstOrNull { it.id == down.id } ?: e.changes.first()
-                            val now = VoiceCapsule.cancelArmed(down.position.y - ch.position.y, density)
+                            // 2.1.7: window coordinates — the keyboard closing (layout drops) is not a slide.
+                            val now = VoiceCapsule.cancelArmed(down.position.y, startOrigin, ch.position.y, originY[0], density)
                             if (now != isArmed) { isArmed = now; armed(now) }
                             if (e.changes.none { it.pressed }) break
                         }
