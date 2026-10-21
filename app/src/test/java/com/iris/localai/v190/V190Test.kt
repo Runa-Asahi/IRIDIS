@@ -602,7 +602,8 @@ class V190Test {
         val composer = source("src/main/java/com/iris/localai/ui/chat/Composer.kt")
         assertTrue(composer.contains("onToggleAgent"))
         val vm = source("src/main/java/com/iris/localai/ui/chat/ChatViewModel.kt")
-        assertTrue(vm.contains("requester == Requester.CHAT && c.agent.settings.current.agentMode"))
+        // 2.1.7: typed chat follows 智能体; voice goes through the agent too when it is on (or a task).
+        assertTrue(vm.contains("Requester.CHAT -> agentOn"))
         val dialog = source("src/main/java/com/iris/localai/ui/agent/AgentUi.kt")
         for (b in listOf("允许一次", "总是允许", "拒绝")) assertTrue(dialog.contains("\"$b\""))
         val home = source("src/main/java/com/iris/localai/ui/settings/SettingsScreens.kt")

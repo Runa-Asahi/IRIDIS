@@ -788,8 +788,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
     private fun planFor(conv: Conversation, ready: EngineState.Ready?, voice: Boolean, thinkingBudget: Int = 0, agent: Boolean = false, maxNewOverride: Int? = null): com.iris.localai.util.ContextPlan {
         val s = c.settings.current
         val eff = c.engine.effective(ready?.model).let { e -> if (maxNewOverride != null) e.copy(maxNewTokens = maxNewOverride) else e }
-        // In a spoken conversation, markdown, lists and long answers sound terrible read aloud.
-        val baseSystem = listOf(eff.systemPrompt.trim(), if (voice) VOICE_HINT else "").filter { it.isNotEmpty() }.joinToString("\n\n")
+        // 2.1.7: the voice instruction rides on the newest user turn (VoiceStyle.withVoiceNote), so the
+        // system prompt — and the engine's cached prefix — is identical in and out of voice mode.
+        val baseSystem = eff.systemPrompt.trim()
         // 1.10.0: 智能体 history carries earlier tool steps (rolled up); a compaction summary replaces
         // the folded messages; the frozen long-term memory joins the system prompt.
         val active = com.iris.localai.context.ContextAssembly.active(conv.messages, conv.contextStartAfterId, withTools = agent, vision = ready?.details?.supportsVision == true)
@@ -902,8 +903,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
                         return@request
                     }
                     started = true
-                    // 1.9.0: 智能体 mode (typed chat only; voice always answers directly).
-                    if (requester == Requester.CHAT && c.agent.settings.current.agentMode) runAgentReply(bubble())
+                    // 1.9.0: 智能体 mode. 2.1.7: voice uses tools too — 智能体 on, or a spoken task (VoiceRouting).
+                    val agentOn = c.agent.settings.current.agentMode
+                    val viaAgent = when (requester) {
+                        Requester.CHAT -> agentOn
+                        Requester.VOICE -> com.iris.localai.voice.VoiceRouting.useAgent(
+                            conversation.value.messages.lastOrNull { it.role == Role.USER }?.content.orEmpty(), agentOn)
+                        else -> false
+                    }
+                    if (viaAgent) runAgentReply(bubble(), voiceOut = if (requester == Requester.VOICE) (onAnswerDelta ?: {}) else null)
                     else runReply(requester, bubble(), onAnswerDelta)
                 }
             } finally {
@@ -988,7 +996,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
                     conv.copy(messages = conv.messages.map {
                         if (it.id != reply.id) it
                         else it.copy(
-                            content = if (done) text.trim() else text,
+                            // 2.1.7: a spoken reply loses its boilerplate opener / closer in the bubble too.
+                            content = if (requester == Requester.VOICE && !text.contains("<think")) com.iris.localai.voice.VoiceStyle.polish(text) else text.trim(),
                             thinkingMs = thinkMs,
                             stats = result?.stats,
                             outputChars = timer.chars,
@@ -1040,10 +1049,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
                 }
                 val p = plan!!
                 val sampling = c.engine.samplingFor(noThinking, contextShift = p.contextShift, keepTokens = p.keepTokens)
-                promptLog.record(reply.id, p.messages)
+                promptLog.record(reply.id, if (requester == Requester.VOICE) com.iris.localai.voice.VoiceStyle.withVoiceNote(p.messages) else p.messages)
                 act(if (answerOnly) "继续生成回答" else if (p.messages.lastOrNull { it.role == PromptMessage.USER }?.let { pickImages(it) } == true) "读取图片与提示（视觉编码 + 预填充）" else "读取提示（预填充）")
                 c.engine.generate(
-                    withImages(p.messages),
+                    withImages(if (requester == Requester.VOICE) com.iris.localai.voice.VoiceStyle.withVoiceNote(p.messages) else p.messages),
                     if (meter != null) sampling.copy(maxNewTokens = meter.engineLimit()) else sampling,
                     requester,
                     engineOwner,
@@ -1362,13 +1371,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
      * the message ([ChatMessage.agentSteps]) and drawn as cards. Only the final answer goes back
      * into later turns' history (small context windows).
      */
-    private suspend fun runAgentReply(reply: ChatMessage) {
+    private suspend fun runAgentReply(reply: ChatMessage, voiceOut: ((String) -> Unit)? = null) {
         val s = c.settings.current
         val ag = c.agent.settings.current
         val ready = c.engine.state.value as? EngineState.Ready
         val details = ready?.details
         val eff = c.engine.effective()
-        val disableThinking = !eff.thinking
+        // 2.1.7: a spoken run answers without reasoning (as the plain voice reply always did).
+        val disableThinking = !eff.thinking || voiceOut != null
+        var toolCues = 0
         val prefix = if (details?.thinkingPrefilled == true && !disableThinking) "<think>" else ""
         val history = c.agent.history
         val memoryOn = c.agent.memorySettings.current.enabled
@@ -1447,6 +1458,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         }
         val callbacks = object : com.iris.localai.agent.AgentCallbacks {
             override suspend fun confirm(tool: com.iris.localai.agent.AgentTool, call: com.iris.localai.agent.ToolCall): com.iris.localai.agent.UserDecision {
+                // 2.1.7: no dialog in a voice call — decline, and say it needs the screen.
+                if (voiceOut != null) {
+                    voiceCue?.invoke(com.iris.localai.voice.VoiceCues.CONFIRM_ON_SCREEN)
+                    notice.value = "语音对话中不执行需要确认的操作（${tool.label}），请在屏幕上发送后确认"
+                    return com.iris.localai.agent.UserDecision.DENY
+                }
                 val d = kotlinx.coroutines.CompletableDeferred<com.iris.localai.agent.UserDecision>()
                 _stream.value = null
                 val prefix = if (tool.name == com.iris.localai.agent.RunCommandTool.name)
@@ -1487,6 +1504,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
             }
             override fun onWorkspaceChanged() = c.agent.changed()
             override fun onMemoryChanged() = c.agent.memoryChanged()
+            override suspend fun beforeTool(tool: com.iris.localai.agent.AgentTool, call: com.iris.localai.agent.ToolCall) {
+                // 2.1.7: a fixed short phrase before the first tool (no tokens); tool blocks never reach TTS.
+                if (voiceOut != null && toolCues++ == 0) voiceCue?.invoke(com.iris.localai.voice.VoiceCues.before(tool.name, 0))
+            }
         }
         // 1.12.0 process_file: one fresh prompt per part (no history, no thinking), output up to
         // half the window; the part itself about 55% of that (translations grow).
@@ -1525,6 +1546,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
             // 2.3: stable system prompt (persona + tools + instructions + frozen memory); the plan goes on the new user turn.
             val base = listOf(PromptMessage(PromptMessage.SYSTEM, agentSystemFor(conversation.value, ready, tools))) +
                 com.iris.localai.agent.AgentPrompt.withPlanNote(history, c.agent.plans.get(convId))
+                    .let { if (voiceOut != null) com.iris.localai.voice.VoiceStyle.withVoiceNote(it) else it }
             val budget = (ctxTokens - maxNew - 32).coerceAtLeast(ctxTokens / 3)
             // 1.10.6: continue from the previous 智能体 run's full prompt when nothing in between
             // changed, so the engine reuses its KV cache (fast first token) and the model still sees
@@ -1544,6 +1566,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
             agentTranscript = null
             val o = loop.run(runBase)
             outcome = o
+            // 2.1.7: only the final answer is spoken (no tool blocks, no reasoning).
+            voiceOut?.invoke(ThinkParser.parse(o.finalText, expectThinking = prefix.isNotEmpty()).answer)
             android.util.Log.i(GEN_TAG, "agent: stop=${o.stop} steps=${o.steps.size} tools=${tools.size}" + (o.error?.let { " error=$it" } ?: ""))
             if (o.stop == com.iris.localai.agent.AgentStop.MAX_STEPS) notice.value = "已达到最大步数（${ag.maxSteps} 步），智能体已停止调用工具"
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1586,7 +1610,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
             _stream.value = null
             streamingId.value = null
             if (background) com.iris.localai.service.GenerationMonitor.finish(convId, timer.chars, cancelled)
-            if (!cancelled) _replyFinished.tryEmit(err == null)
+            if (!cancelled && voiceOut == null) _replyFinished.tryEmit(err == null)
             conversation.update { it.copy(updatedAt = System.currentTimeMillis()) }
             persist()
             runLimitJob?.cancel()
@@ -1723,10 +1747,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         }
         append(ChatMessage(role = Role.USER, content = userText))
         val deltas = Channel<String>(Channel.UNLIMITED)
-        val job = startReply(Requester.VOICE) { deltas.trySend(it) }
-        job.invokeOnCompletion { deltas.close() }
+        // 2.1.7: only speakable text reaches TTS (no markdown / code / links / emoji / boilerplate,
+        // ≤ 3 sentences; the bubble keeps the full reply). Tool cues pass straight through.
+        val speech = com.iris.localai.voice.VoiceSpeech()
+        voiceCue = { cue -> speech.cue(cue).forEach { deltas.trySend(it) } }
+        val job = startReply(Requester.VOICE) { d -> speech.push(d).forEach { deltas.trySend(it) } }
+        job.invokeOnCompletion { speech.flush().forEach { deltas.trySend(it) }; voiceCue = null; deltas.close() }
         for (d in deltas) send(d)
     }.buffer(Channel.UNLIMITED)
+
+    /** 2.1.7: speaks a fixed short phrase in the running voice call (「我查一下」); null = not in a call. */
+    @Volatile private var voiceCue: ((String) -> Unit)? = null
 
     override fun cancelReply() = stop()
 
@@ -1801,7 +1832,5 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         const val AGENT_MAX_NEW = 1536
         const val WARM_DELAY_MS = 600L
         const val ATTACH_NO_VISION = "当前模型看不到图片，只会收到图片的文件名。换一个支持视觉的模型（如 Gemma 3n、Qwen-VL）后可识图"
-        const val VOICE_HINT = "现在是语音对话，你的回答会被直接朗读出来。请像面对面聊天一样，用简短自然的口语回答，" +
-            "一般不超过三四句话；不要使用 Markdown、标题、列表、表格、代码块或表情符号；数字和单位用口语读法。"
     }
 }

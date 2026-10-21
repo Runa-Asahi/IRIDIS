@@ -203,6 +203,8 @@ interface AgentCallbacks {
     fun onWorkspaceChanged() {}
     /** 1.10.0: the memory tool changed USER.md / MEMORY.md. */
     fun onMemoryChanged() {}
+    /** 2.1.7: a tool is about to run (permission granted) — voice speaks a short 「我查一下」. */
+    suspend fun beforeTool(tool: AgentTool, call: ToolCall) {}
 }
 
 enum class AgentStop { DONE, MAX_STEPS, ERROR }
@@ -240,6 +242,11 @@ class AgentLoop(
     private val answerOf: (String) -> String = { it },
     /** Runs a tool off the caller's thread (Dispatchers.IO in the app). */
     private val runTool: suspend (() -> ToolResult) -> ToolResult = { it() },
+    /**
+     * 2.1.7: what the user added while the run was going (「用户补充：…」), read before every model
+     * step; it rides on the newest user-side message (not yet prefilled, so the KV prefix stays).
+     */
+    private val pendingNotes: () -> String? = { null },
 ) {
     private val steps = ArrayList<AgentStep>()
 
@@ -253,6 +260,7 @@ class AgentLoop(
         var nudged = false
         while (true) {
             currentCoroutineContext().ensureActive()
+            pendingNotes()?.takeIf { it.isNotBlank() }?.let { injectNote(msgs, it) }
             fixed = fit(msgs, fixed)
             val tLlm0 = System.currentTimeMillis()
             val turn = model.complete(msgs.toList()) { callbacks.onText(ToolCallParser.visibleText(it)) }
@@ -350,6 +358,7 @@ class AgentLoop(
                                 if (perm == Permission.DENY) "设置中已拒绝" else "用户已拒绝")
                             status = StepStatus.DENIED
                         } else {
+                            callbacks.beforeTool(tool, call)
                             result = try {
                                 if (tool is SuspendTool) {
                                     // 1.12.0: long-running tool (process_file) — progress goes into its card.
@@ -377,6 +386,14 @@ class AgentLoop(
                 }
             }
         }
+    }
+
+    /** 2.1.7: appends [note] to the newest user-side message (a tool result or the request), or adds one. */
+    private fun injectNote(msgs: MutableList<PromptMessage>, note: String) {
+        val i = msgs.lastIndex
+        if (i >= 0 && msgs[i].role == PromptMessage.USER) msgs[i] = msgs[i].copy(content = msgs[i].content.trimEnd() + "\n\n" + note.trim())
+        else msgs += PromptMessage(PromptMessage.USER, note.trim())
+        android.util.Log.i(AGENT_TAG, "user note injected (${note.length} chars)")
     }
 
     /** Step limit hit: one last turn without tools for a summary (a stray call in it is dropped). */
