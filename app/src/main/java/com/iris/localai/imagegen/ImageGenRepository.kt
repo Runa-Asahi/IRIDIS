@@ -79,7 +79,7 @@ object ImageGenFiles {
 }
 
 /** 生图 state on disk: catalog, which models are downloaded, results and their history. */
-class ImageGenRepository(private val context: Context) {
+class ImageGenRepository(internal val context: Context) {
     val catalog: List<ImageModel> = ImageCatalog.all
 
     private val privateModels: File by lazy {
@@ -122,6 +122,10 @@ class ImageGenRepository(private val context: Context) {
             .getOrElse { ImageGenFiles.write(ImageGenFiles.outputFile(agent.privateRoot, time), png, params) }
     }
 
+    /** The folder of [model] in whichever root holds a complete download, null when none does. */
+    fun downloadedDir(model: ImageModel): File? =
+        modelsLocation().listDirs.firstOrNull { ImageGenFiles.isDownloaded(it, model) }?.let { ImageGenFiles.modelDir(it, model) }
+
     fun history(): List<File> {
         val roots = listOf(workspaceRoot(), agent.privateRoot).distinctBy { it.absolutePath }
         return roots.flatMap { ImageGenFiles.history(it) }.distinctBy { it.absolutePath }
@@ -135,7 +139,7 @@ class ImageGenRepository(private val context: Context) {
  */
 class RepositoryImageGenBackend(
     private val repo: ImageGenRepository,
-    private val engine: ImageGenEngine = StubEngine(),
+    private val engine: ImageGenEngine = ImageGenEngines.get(repo.context),
 ) : com.iris.localai.agent.ImageGenBackend {
     override fun runnableModels(): List<ImageModel> {
         val dl = runCatching { repo.downloaded() }.getOrDefault(emptySet())
@@ -148,4 +152,55 @@ class RepositoryImageGenBackend(
     override fun save(png: ByteArray, req: ImageRequest, model: ImageModel): File = repo.save(png, req, model)
 
     override fun cancel() = engine.cancel()
+}
+
+/** An engine that cannot run on this device: every request fails with [reason]. */
+class UnavailableEngine(private val reason: String) : ImageGenEngine {
+    override suspend fun generate(req: ImageRequest, model: ImageModel, onProgress: (step: Int, total: Int) -> Unit): Result<ByteArray> =
+        Result.failure(IllegalStateException(reason))
+    override fun cancel() = Unit
+}
+
+/**
+ * The process-wide 生图 engine (shared by the 生图 page and generate_image, so the NPU graphs load once):
+ * sd15-qnn → [QnnSdEngine] when libiris_imagegen's probe says the QNN HTP backend and device come up;
+ * every other model → [StubEngine] for now. Runs in-process on the caller's dispatcher (Dispatchers.Default).
+ */
+class ImageGenEngines private constructor(private val context: Context) : ImageGenEngine {
+    private val repo by lazy { ImageGenRepository(context) }
+    private val stub = StubEngine()
+    @Volatile private var qnn: QnnSdEngine? = null
+    @Volatile private var active: ImageGenEngine? = null
+
+    fun engineFor(model: ImageModel): ImageGenEngine {
+        if (model.backend != Backend.QNN) return stub
+        qnn?.let { return it }
+        val probe = DeviceProbe.nativeProbe(context)
+        val dir = DeviceProbe.qnnRuntimeDir(context.filesDir, probe.htpArch ?: DeviceProbe.htpArch(DeviceProbe.socModel()))
+        return when {
+            !probe.libLoaded -> UnavailableEngine("NPU 生图原生库未加载：${probe.error ?: "?"}")
+            dir == null -> UnavailableEngine("缺少 QNN 运行库：请先在 设置 › 模型与后端 安装 NPU 运行库")
+            !(probe.backendOk && probe.deviceOk) -> UnavailableEngine("QNN 后端初始化失败：${probe.error ?: "?"}")
+            else -> synchronized(this) {
+                qnn ?: QnnSdEngine(modelDir = { repo.downloadedDir(it) }, loader = NativeQnnGraphLoader(dir)).also { qnn = it }
+            }
+        }
+    }
+
+    override suspend fun generate(req: ImageRequest, model: ImageModel, onProgress: (step: Int, total: Int) -> Unit): Result<ByteArray> {
+        val e = runCatching { engineFor(model) }.getOrElse { return Result.failure(it) }
+        active = e
+        return try { e.generate(req, model, onProgress) } finally { if (active === e) active = null }
+    }
+
+    override fun cancel() { active?.cancel() }
+
+    /** Frees the NPU graphs (≈1.1 GB) until the next generation. */
+    fun release() { qnn?.release() }
+
+    companion object {
+        @Volatile private var instance: ImageGenEngines? = null
+        fun get(context: Context): ImageGenEngines =
+            instance ?: synchronized(this) { instance ?: ImageGenEngines(context.applicationContext).also { instance = it } }
+    }
 }

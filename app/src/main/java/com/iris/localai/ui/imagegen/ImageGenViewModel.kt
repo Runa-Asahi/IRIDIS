@@ -12,7 +12,6 @@ import com.iris.localai.imagegen.ImageGenEngine
 import com.iris.localai.imagegen.ImageGenRepository
 import com.iris.localai.imagegen.ImageModel
 import com.iris.localai.imagegen.ImageRequest
-import com.iris.localai.imagegen.StubEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -91,7 +90,7 @@ data class ImageGenUi(
 
 class ImageGenViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = ImageGenRepository(app)
-    private val engine: ImageGenEngine = StubEngine()
+    private val engine: ImageGenEngine = com.iris.localai.imagegen.ImageGenEngines.get(app)
     private val _ui = MutableStateFlow(ImageGenUi())
     val ui: StateFlow<ImageGenUi> = _ui.asStateFlow()
     private var job: Job? = null
@@ -176,6 +175,8 @@ class ImageGenViewModel(app: Application) : AndroidViewModel(app) {
         val model = s.model
         _ui.update { it.copy(running = true, step = 0, total = req.steps, error = null, seed = req.seed.toString()) }
         job = viewModelScope.launch {
+            // The NPU pipeline holds ≈1.1 GB: free the chat model first (it reloads on the next chat message).
+            if (model.backend == com.iris.localai.imagegen.Backend.QNN) runCatching { container.engine.unload("生图") }
             val r = withContext(Dispatchers.Default) {
                 engine.generate(req, model) { step, total -> _ui.update { it.copy(step = step, total = total) } }
             }
@@ -198,7 +199,8 @@ class ImageGenViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val report = withContext(Dispatchers.IO) {
                 val dl = runCatching { repo.downloaded() }.getOrDefault(emptySet())
-                DeviceProbe.report(DeviceProbe.probe(getApplication(), dl))
+                val native = DeviceProbe.nativeProbe(getApplication(), refresh = true)
+                DeviceProbe.report(DeviceProbe.probe(getApplication(), dl, native), native)
             }
             _ui.update { it.copy(report = report) }
         }
