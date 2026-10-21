@@ -151,6 +151,8 @@ object BrowserSearch {
     private val JUNK = setOf("翻译此页", "翻譯此頁", "Translate this page", "网页快照", "Cached", "更多", "More", "广告", "Ad", "Ads", "Sponsored", "赞助商")
     private val DATE_HEAD = Regex("^(\\d{4}年\\d{1,2}月\\d{1,2}日|\\d+\\s*(天|小时|小時|分钟|分鐘|周|週)前|\\d+ (days?|hours?|minutes?) ago|[A-Z][a-z]{2} \\d{1,2}, \\d{4})\\s*[—–-]\\s*")
 
+    private val DATE_LINE = Regex("^(\\d{4}年\\d{1,2}月\\d{1,2}日|\\d{4}-\\d{1,2}-\\d{1,2}|\\d+\\s*(天|小时|小時|分钟|分鐘|周|週|个月|個月)前|昨天|前天|\\d+ (days?|hours?|mins?|minutes?|weeks?|months?) ago|[A-Z][a-z]{2} \\d{1,2}, \\d{4}|\\d{1,2} [A-Z][a-z]{2} \\d{4})$")
+
     private fun isCrumb(l: String) = l.contains('›') || BREADCRUMB.matches(l)
 
     /** Site name (the short line above the title), date and snippet text from a result's lines. */
@@ -160,9 +162,11 @@ object BrowserSearch {
         val source = if (ti > 0) ls.subList(0, ti).firstOrNull { !isCrumb(it) && it.length <= 40 }.orEmpty() else ""
         val body = (if (ti >= 0) ls.drop(ti + 1) else ls)
             .filter { !isCrumb(it) && it != title && it != source }
-        var text = body.joinToString(" ")
-        var date = ""
-        DATE_HEAD.find(text)?.let { m -> date = m.groupValues[1]; text = text.substring(m.range.last + 1) }
+        // 2.1.7: Google News cards put the date on its own line after the snippet ("3 小时前");
+        // it used to be glued onto the snippet and was often cut off by the length cap.
+        var date = body.lastOrNull { DATE_LINE.matches(it) }.orEmpty()
+        var text = body.filter { it != date || date.isEmpty() }.joinToString(" ")
+        DATE_HEAD.find(text)?.let { m -> if (date.isEmpty()) date = m.groupValues[1]; text = text.substring(m.range.last + 1) }
         return Triple(source, date, SearchText.clean(text).take(SearchText.SNIPPET_CHARS))
     }
 

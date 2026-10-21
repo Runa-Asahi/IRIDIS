@@ -228,8 +228,9 @@ object SearchText {
     fun shortDate(s: String): String = Regex("\\d{1,2} \\w{3} \\d{4}").find(s)?.value.orEmpty()
 
     fun render(q: String, hits: List<SearchHit>): String = buildString {
-        append("Search results for \"").append(q).append("\" (read a page with ")
-        append("web_fetch or browser for details):\n")
+        // 2.1.7: tells the model to answer from the snippets (it used to read "read a page for
+        // details" as the next step and kept fetching until the step limit).
+        append("Search results for \"").append(q).append("\" (answer from these; web_fetch a url only if more detail is needed):\n")
         hits.forEachIndexed { i, h ->
             append(i + 1).append(". ").append(h.title)
             val meta = listOf(h.source, h.date).filter { it.isNotBlank() }.joinToString(", ")

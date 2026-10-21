@@ -208,6 +208,10 @@ object ToolCallParser {
     fun callEnd(streamed: CharSequence): Int? {
         val s = streamed.toString()
         val noThinkStart = thinkEnd(s)
+        // 2.1.7: inside unfinished thinking the model often *mentions* "<tool_response>" while
+        // reading the results ("the <tool_response> shows…"); cutting there ended the turn with
+        // an empty answer. Only a complete call ends a turn while thinking is still open.
+        val inThink = openThinkAt(s) >= 0
         // 1.10.4: cheap guard — most streamed tokens contain none of the call markers,
         // so skip the full regex scan (the per-token hot path).
         // 1.13.3: Gemma 4 native call ends at <tool_call|>.
@@ -234,6 +238,7 @@ object ToolCallParser {
             return if (close >= 0) close + 3 else null
         }
         // A hallucinated tool result: cut right before it.
+        if (inThink) return null
         val resp = s.indexOf("<tool_response", noThinkStart, ignoreCase = true)
         if (resp >= 0) return resp
         return null
@@ -349,6 +354,25 @@ object ToolCallParser {
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /** Index of a `<think>` that is still open (no `</think>` after it), or -1. */
+    private fun openThinkAt(s: String): Int {
+        val open = s.lastIndexOf("<think>", ignoreCase = true)
+        if (open < 0) return -1
+        return if (s.indexOf("</think>", open, ignoreCase = true) >= 0) -1 else open
+    }
+
+    /**
+     * 2.1.7: the canonical block of a complete call written inside thinking that never closed
+     * ([callEnd] stops the stream right after it), or null. The answer part of such a turn is
+     * empty, so without this the call was neither run nor shown.
+     */
+    fun callInOpenThink(raw: String): String? {
+        val open = openThinkAt(raw)
+        if (open < 0) return null
+        val r = parse(raw.substring(open + "<think>".length))
+        return (r as? ParsedReply.Call)?.call?.canonical()
+    }
 
     /** Where the answer starts: after a closed think block, or 0. An unclosed one hides nothing. */
     private fun thinkEnd(s: String): Int {

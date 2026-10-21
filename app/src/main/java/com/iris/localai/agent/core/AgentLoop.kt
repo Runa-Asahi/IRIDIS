@@ -77,9 +77,11 @@ object AgentPrompt {
         append("You are IRIS, an AI agent on the user's Android phone.\n\n")
 
         append("# Rules\n")
-        append("- Reply in Chinese, concise. Never claim actions you did not take.\n")
-        append("- Chat or simple questions: plain text with NO tool block (\"system\" is not a tool).\n")
-        append("- Use tools only when needed; if one fails, fix it once or report it.\n\n")
+        append("- Reply in Chinese, concise. Never claim actions you didn't take.\n")
+        append("- Chat/simple questions: plain text with NO tool block (\"system\" is not a tool).\n")
+        // 2.1.7: "then report their findings" was lost in the 2.1.6 trim ("When done, answer briefly
+        // with what you did"): small models ended a news search with "已搜索" or nothing at all.
+        append("- Use tools only if needed, then report their findings; fix a failed one once or say so.\n\n")
 
         append("# Tool calls\n")
         append("Call a tool with ONLY this, then stop and wait:\n")
@@ -89,7 +91,7 @@ object AgentPrompt {
             append("```tool\n{\"tool\": \"read_file\", \"args\": {\"path\": \"notes/todo.md\"}}\n```\n")
         }
         append("- One call per reply, valid JSON. Results come in <tool_response>; never write one.\n")
-        append("- Use only the names below; asked about your tools, answer in words.\n\n")
+        append("- Only the names below; asked about tools, reply in words.\n\n")
 
         if (tools.isNotEmpty()) {
             // 1.12.0: grouped, one shared hint per group. Group order and tool order are fixed
@@ -170,7 +172,12 @@ fun retryHint(error: String): String =
     fun unknownToolHint(name: String, available: Set<String>): String =
         "<tool_response>\nError: there is no tool \"$name\". Do not guess tool names. Use one of: ${available.joinToString()} — or answer the user in plain text without any tool.\n</tool_response>"
 
-    const val STEP_LIMIT = "Step limit reached. Do not call any more tools. Tell the user in Chinese what was done and what is left."
+    const val STEP_LIMIT = "Step limit reached. Do not call any more tools. Answer the user in Chinese now with what the tool results above show, and what is left."
+    /**
+     * 2.1.7: added to the newest user turn when a reply came back empty (only thinking, a call
+     * buried in unfinished thinking, or nothing): one more turn to give the actual answer.
+     */
+    const val ANSWER_NOW = "(Your last reply was empty. Answer the user now in Chinese with what the tool results above show: key facts, dates, sources. No tool call; keep thinking short.)"
     const val ELIDED = "<tool_response>\n(earlier tool output removed to save context)\n</tool_response>"
 }
 
@@ -243,6 +250,7 @@ class AgentLoop(
         var retried = false
         var unknownRetried = false
         var echoRetried = false
+        var nudged = false
         while (true) {
             currentCoroutineContext().ensureActive()
             fixed = fit(msgs, fixed)
@@ -250,7 +258,9 @@ class AgentLoop(
             val turn = model.complete(msgs.toList()) { callbacks.onText(ToolCallParser.visibleText(it)) }
             android.util.Log.i(AGENT_TAG, "step $calls: llm=${System.currentTimeMillis() - tLlm0}ms msgs=${msgs.size} prompt~${msgs.sumOf { it.content.length / 4 }}tok raw=\"${turn.text.take(500).replace('\n', ' ')}\"")
             if (turn.error != null) return AgentOutcome(turn.text, steps.toList(), AgentStop.ERROR, turn.error)
-            val answer = answerOf(turn.text)
+            // 2.1.7: a call written inside unfinished thinking (the stream is cut right after it, so
+            // the think block never closes) used to leave an empty answer: run that call instead.
+            val answer = answerOf(turn.text).ifBlank { ToolCallParser.callInOpenThink(turn.text) ?: "" }
             when (val p = ToolCallParser.parse(answer)) {
                 is ParsedReply.Final -> {
                     // 1.13.0: the model wrote a fake tool log (copied from history) instead of calling.
@@ -262,6 +272,21 @@ class AgentLoop(
                         continue
                     }
                     val clean = com.iris.localai.context.ToolRollup.stripEcho(answer.trim())
+                    if (clean.isBlank()) {
+                        // 2.1.7: an empty answer (thinking only / hit the length cap) showed the user
+                        // nothing after a search. One forced follow-up, then the results themselves.
+                        if (!nudged) {
+                            nudged = true
+                            android.util.Log.w(AGENT_TAG, "empty answer after ${steps.size} step(s) (forced follow-up)")
+                            nudge(msgs, AgentPrompt.ANSWER_NOW)
+                            continue
+                        }
+                        if (steps.isNotEmpty()) {
+                            val text = closeThink(turn.text) + fallbackAnswer(steps)
+                            return AgentOutcome(text, steps.toList(), AgentStop.DONE,
+                                transcript = msgs + PromptMessage(PromptMessage.ASSISTANT, answerOf(text).trim()))
+                        }
+                    }
                     return AgentOutcome(ToolCallParser.stripCalls(com.iris.localai.context.ToolRollup.stripEcho(turn.text)), steps.toList(), AgentStop.DONE,
                         transcript = msgs + PromptMessage(PromptMessage.ASSISTANT, clean))
                 }
@@ -360,13 +385,27 @@ class AgentLoop(
         msgs += PromptMessage(PromptMessage.USER, AgentPrompt.STEP_LIMIT)
         fit(msgs, fixed)
         val turn = model.complete(msgs.toList()) { callbacks.onText(ToolCallParser.visibleText(it)) }
-        val text = when (val r = ToolCallParser.parse(answerOf(turn.text))) {
+        val r = ToolCallParser.parse(answerOf(turn.text))
+        var text = when (r) {
             is ParsedReply.Final -> turn.text
             is ParsedReply.Call -> r.before
             is ParsedReply.Malformed -> r.before
         }
+        // 2.1.7: nothing said at the limit → the newest tool results instead of an empty bubble.
+        val said = if (r is ParsedReply.Final) r.text else text
+        if (turn.error == null && said.isBlank()) text = closeThink(turn.text.takeIf { r is ParsedReply.Final }.orEmpty()) + fallbackAnswer(steps)
         return AgentOutcome(text, steps.toList(), AgentStop.MAX_STEPS, turn.error,
             transcript = msgs + PromptMessage(PromptMessage.ASSISTANT, answerOf(text).trim()))
+    }
+
+    /**
+     * 2.1.7: [note] added to the newest user message (a tool response or the request) rather than as
+     * a new message, so roles still alternate (Gemma-style templates reject two user turns).
+     */
+    private fun nudge(msgs: MutableList<PromptMessage>, note: String) {
+        val i = msgs.indexOfLast { it.role == PromptMessage.USER }
+        if (i == msgs.lastIndex && i >= 0) msgs[i] = msgs[i].copy(content = msgs[i].content.trimEnd() + "\n" + note)
+        else msgs += PromptMessage(PromptMessage.USER, note)
     }
 
     /** The model's reply as written (already cut after its call); the canonical block if it is empty. */
@@ -407,9 +446,12 @@ class AgentLoop(
             val m = msgs[i]
             if (isToolOut(m)) msgs[i] = m.copy(content = shortenToolOutput(m.content, EARLIER_KEEP))
         }
-        // 2. this run's oldest outputs
+        // 2. this run's oldest outputs (2.1.7: never the newest one — the answer turn after a step
+        // limit or an empty reply ends on a note, so "all but the last message" could stub it out)
+        val newest = msgs.indexOfLast { isToolOut(it) }
         for (i in fixed until msgs.size - 1) {
             if (total() <= contextBudget) return fixed
+            if (i == newest) continue
             val m = msgs[i]
             if (isToolOut(m)) msgs[i] = m.copy(content = AgentPrompt.ELIDED)
         }
@@ -444,5 +486,35 @@ class AgentLoop(
             return "<tool_response>\n" + body.take(keep).trimEnd() + "\n…(shortened to save context)\n</tool_response>"
         }
         private val CHANGES = setOf(ToolRisk.WRITE, ToolRisk.DELETE)
+
+        const val FALLBACK_HEAD = "（模型没有给出回答，以下是工具找到的结果）"
+        const val FALLBACK_MAX = 1500
+
+        /** Raw turn text with an unclosed `<think>` closed, so text appended after it is the answer. */
+        fun closeThink(raw: String): String {
+            val t = raw.trimEnd()
+            val open = t.lastIndexOf("<think>", ignoreCase = true)
+            val close = t.lastIndexOf("</think>", ignoreCase = true)
+            return when {
+                open > close -> "$t\n</think>\n\n"
+                t.isNotEmpty() -> "$t\n\n"
+                else -> ""
+            }
+        }
+
+        /**
+         * 2.1.7: what the user sees when the model said nothing after its tools: the newest
+         * successful tool output (search hits with snippets, page text), header and truncation
+         * notes removed, capped; or a short note naming the tools that ran.
+         */
+        fun fallbackAnswer(steps: List<AgentStep>): String {
+            val last = steps.lastOrNull { it.status == StepStatus.OK && it.detail.isNotBlank() }
+                ?: return "（模型没有给出回答。已运行：" + steps.joinToString("、") { it.title.ifBlank { it.tool } } + "。可以重试或换个问法。）"
+            val body = last.detail.lines()
+                .filterNot { it.startsWith("Search results for ") || it.startsWith("[TRUNCATED by the tool") || it.startsWith("Note: ") }
+                .joinToString("\n").trim()
+            val capped = if (body.length > FALLBACK_MAX) body.take(FALLBACK_MAX).trimEnd() + "…" else body
+            return FALLBACK_HEAD + "\n\n" + capped
+        }
     }
 }
