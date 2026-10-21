@@ -38,7 +38,7 @@ class V211ImageInputTest {
     }
 
     @Test fun mnnGetsSmallerPictures() {
-        assertEquals(1024, VisionPrompt.maxSide(0))
+        assertEquals(512, VisionPrompt.maxSide(0)) // 2.1.7: 1024 → 512
         assertEquals(512, VisionPrompt.maxSide(Attachments.MNN_VISION_MAX_SIDE))
         assertEquals(Pair(512, 384), Attachments.visionTarget(4000, 3000, 512))
         assertEquals(Pair(230, 512), Attachments.visionTarget(1080, 2400, 512))
@@ -47,7 +47,7 @@ class V211ImageInputTest {
     }
 
     @Test fun cacheCopyKeyedBySize() {
-        assertEquals("/a/b.png.vis.jpg", Attachments.visionPathFor("/a/b.png"))
+        assertEquals("/a/b.png.vis.jpg", Attachments.visionPathFor("/a/b.png", 1024))
         assertEquals("/a/b.png.vis512.jpg", Attachments.visionPathFor("/a/b.png", 512))
         assertTrue(Attachments.isVisionCopyOf("b.png", "b.png.vis.jpg"))
         assertTrue(Attachments.isVisionCopyOf("b.png", "b.png.vis512.jpg"))

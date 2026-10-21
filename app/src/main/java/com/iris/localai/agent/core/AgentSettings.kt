@@ -392,7 +392,26 @@ class AgentContainer(context: Context) {
         llm = llm,
         chunkTokens = chunkTokens,
         knowledge = KnowledgeSearch { q, n -> knowledge.search(q, n) },
+        imageGen = imageGen,
     )
+
+    /**
+     * 2.1.7: whether a runnable image model is downloaded (generate_image is listed only then).
+     * Re-checked at most once a minute so the prompt (and its KV cache) does not flip turn by turn.
+     */
+    fun imageGenOnCached(): Boolean {
+        val now = System.currentTimeMillis()
+        imageGenOn?.let { if (now - imageGenChecked < 60_000L) return it }
+        imageGenChecked = now
+        return runCatching { imageGen.runnableModels().isNotEmpty() }.getOrDefault(false).also { imageGenOn = it }
+    }
+    @Volatile private var imageGenOn: Boolean? = null
+    @Volatile private var imageGenChecked = 0L
+
+    /** 2.1.7: generate_image's backend (生图 repository + engine). */
+    private val imageGen: ImageGenBackend by lazy {
+        com.iris.localai.imagegen.RepositoryImageGenBackend(com.iris.localai.imagegen.ImageGenRepository(appContext))
+    }
 
     /** 1.10.6: whether the app holds 全部文件访问 (MANAGE_EXTERNAL_STORAGE, Android 11+). */
     fun hasAllFilesAccess(): Boolean = runCatching { android.os.Environment.isExternalStorageManager() }.getOrDefault(false)

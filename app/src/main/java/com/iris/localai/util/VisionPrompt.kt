@@ -22,4 +22,31 @@ object VisionPrompt {
 
     /** Long side of the picture copy for an engine that asked for [engineMax] (0 = default). */
     fun maxSide(engineMax: Int): Int = if (engineMax > 0) engineMax else Attachments.VISION_MAX_SIDE
+
+    /**
+     * 2.1.7: 「识图清晰度」 [setting] (px, snapped to 384/512/1024), capped by the engine's own limit
+     * [engineMax] (MNN 512: its CPU/GPU ViT at 1024 px took minutes), 0 = no engine limit.
+     */
+    fun maxSide(engineMax: Int, setting: Int): Int {
+        val s = VisionQuality.of(setting).side
+        return if (engineMax > 0) minOf(engineMax, s) else s
+    }
+}
+
+/** 2.1.7 「识图清晰度」: how large a picture the vision model reads. Pure. */
+enum class VisionQuality(val side: Int, val label: String) {
+    FAST(384, "快速"),
+    STANDARD(512, "标准"),
+    SHARP(1024, "清晰");
+
+    companion object {
+        val DEFAULT = STANDARD
+        /** Nearest option for a stored px value (unknown / 0 → 标准). */
+        fun of(side: Int): VisionQuality = when {
+            side <= 0 -> DEFAULT
+            side <= 448 -> FAST
+            side <= 768 -> STANDARD
+            else -> SHARP
+        }
+    }
 }

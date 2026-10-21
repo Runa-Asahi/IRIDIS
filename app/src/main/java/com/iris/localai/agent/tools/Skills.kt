@@ -91,7 +91,7 @@ object SkillTool : AgentTool {
     override val name = "skill"
     override val label = "技能"
     override val description = "按需读取技能说明（内置技能 + 下载/IRIDIS/skills 里的 SKILL.md，只读）"
-    override val promptLine = "skill(name, file?): load a skill (or its file)"
+    override val promptLine = "skill(name, file?): load a skill"
     override val risk = ToolRisk.READ
     override val group = ToolGroup.SKILLS
 

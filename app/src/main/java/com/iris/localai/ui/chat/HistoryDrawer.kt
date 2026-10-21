@@ -99,6 +99,7 @@ fun HistoryDrawer(
     onApi: () -> Unit,
     onFiles: () -> Unit = {},
     onTerminal: () -> Unit = {},
+    onImageGen: () -> Unit = {},
     runningId: String? = null,
     open: Boolean = true,
 ) {
@@ -240,6 +241,7 @@ fun HistoryDrawer(
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
             DrawerNavButton(com.iris.localai.ui.icons.IrisIcons.Cube, DrawerNavText.MODELS, onClick = onModels)
+            DrawerNavButton(com.iris.localai.ui.icons.IrisIcons.Image, DrawerNavText.IMAGEGEN, onClick = onImageGen)
             DrawerNavButton(com.iris.localai.ui.icons.IrisIcons.Folder, DrawerNavText.FILES, onClick = onFiles)
             DrawerNavButton(com.iris.localai.ui.icons.IrisIcons.Terminal, DrawerNavText.TERMINAL, onClick = onTerminal)
             DrawerNavButton(com.iris.localai.ui.icons.IrisIcons.Plug, DrawerNavText.API, badge = apiRunning, onClick = onApi)
@@ -282,6 +284,8 @@ fun HistoryDrawer(
 /** 2.1: short labels of the drawer's bottom navigation. */
 internal object DrawerNavText {
     const val MODELS = "模型"
+    /** 2.1.7 */
+    const val IMAGEGEN = "生图"
     const val FILES = "文件"
     const val TERMINAL = "终端"
     const val API = "API"

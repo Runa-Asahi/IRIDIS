@@ -128,8 +128,14 @@ object Attachments {
         }
     }
 
-    /** 2.0.2: longest side of a picture handed to a vision model. */
-    const val VISION_MAX_SIDE = 1024
+    /**
+     * Longest side of a picture handed to a vision model when nothing else asks. 2.0.2–2.1.6: 1024;
+     * 2.1.7: 512 (「识图清晰度 · 标准」) — 1024 px kept vision prefill busy for tens of seconds on a phone.
+     */
+    const val VISION_MAX_SIDE = 512
+
+    /** 2.0.2's 1024 px copy keeps its old file name (`.vis.jpg`); every other size is `.vis<N>.jpg`. */
+    const val LEGACY_VISION_SIDE = 1024
 
     /**
      * 2.1.1: MNN (Qwen2/2.5/3/3.5-VL) feeds the picture at its own size to a CPU/GPU ViT: 1024 px is
@@ -139,7 +145,7 @@ object Attachments {
 
     /** Scaled copy of [path] for a long side of [max] px (2.0.2's name kept for 1024). */
     fun visionPathFor(path: String, max: Int = VISION_MAX_SIDE): String =
-        if (max == VISION_MAX_SIDE) "$path.vis.jpg" else "$path.vis$max.jpg"
+        if (max == LEGACY_VISION_SIDE) "$path.vis.jpg" else "$path.vis$max.jpg"
 
     /** True when [candidate] is a scaled copy of the attachment file named [original]. Pure. */
     fun isVisionCopyOf(original: String, candidate: String): Boolean {

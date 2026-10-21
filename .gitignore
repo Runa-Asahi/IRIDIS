@@ -15,6 +15,8 @@ captures/
 *.aab
 # fetched by scripts/fetch-deps.sh
 /third_party/
+# QNN C API headers (Qualcomm license) — fetched, never committed
+third_party/qnn-api/
 /app/libs/*.aar
 
 # never publish signing material

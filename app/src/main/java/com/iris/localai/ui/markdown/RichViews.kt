@@ -97,6 +97,7 @@ internal fun rememberRichSettings(): RichSettings {
 
 private object RichText {
     const val PREVIEW = "网页预览"
+    const val OPEN_IMAGE = "查看大图"
     const val SVG = "SVG 预览"
     const val SOURCE = "源码"
     const val SHOW_PREVIEW = "预览"
@@ -347,6 +348,28 @@ internal fun MarkdownImage(block: MdBlock.Image) {
         }
     }
     if (viewer) ImageViewer(src, block.alt) { viewer = false }
+}
+
+/** 2.1.7: a small square thumbnail of a workspace picture (agent step cards); tap opens the full-screen viewer. */
+@Composable
+internal fun ImageThumbnail(path: String, size: Dp = 72.dp) {
+    val c = Iris.colors
+    val ctx = LocalContext.current
+    val src = remember(path) { ImageRefs.classify(path, allowNetwork = false) }
+    if (src is ImageSource.Blocked) { ImageNote("", src.reason); return }
+    val px = with(LocalDensity.current) { size.roundToPx() * 2 }
+    val bitmap by produceState<Bitmap?>(null, src, px) { value = ChatImageLoader.load(ctx, src, px) }
+    var viewer by remember { mutableStateOf(false) }
+    Box(
+        Modifier.size(size).clip(IrisRadius.smallShape).background(c.surface).clickable(onClickLabel = RichText.OPEN_IMAGE) { viewer = true },
+        contentAlignment = Alignment.Center,
+    ) {
+        bitmap?.let { b ->
+            val img = remember(b) { b.asImageBitmap() }
+            Image(img, path.substringAfterLast('/'), contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        } ?: Icon(IrisIcons.Image, null, tint = c.textTertiary, modifier = Modifier.size(20.dp))
+    }
+    if (viewer) ImageViewer(src, path.substringAfterLast('/')) { viewer = false }
 }
 
 @Composable

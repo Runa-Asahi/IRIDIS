@@ -659,6 +659,22 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
             }
         }
 
+    /** 2.1.7 生图 「发到聊天」: a PNG path waiting to join the composer's attachments (ChatScreen consumes it). */
+    private val _incomingImage = MutableStateFlow<String?>(null)
+    val incomingImage: StateFlow<String?> = _incomingImage.asStateFlow()
+    fun attachGeneratedImage(path: String) { _incomingImage.value = path }
+    fun consumeIncomingImage() { _incomingImage.value = null }
+
+    /** Copies a local image (a 生图 result) into app attachments, like a picked photo. */
+    suspend fun importLocalImage(path: String): com.iris.localai.data.Attachment? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            val src = java.io.File(path)
+            val out = java.io.File(com.iris.localai.util.Attachments.dir(getApplication()), java.util.UUID.randomUUID().toString().take(8) + "-" + src.name)
+            src.copyTo(out, overwrite = true)
+            com.iris.localai.data.Attachment(name = src.name, path = out.path, mime = "image/png", sizeBytes = out.length(), kind = com.iris.localai.data.AttachmentKind.IMAGE)
+        }.onFailure { notice.value = "无法附加图片：${it.message}" }.getOrNull()
+    }
+
     fun discardAttachments(list: List<com.iris.localai.data.Attachment>) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { com.iris.localai.util.Attachments.delete(list) }
     }
@@ -673,8 +689,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         val lastUser = conversation.value.messages.lastOrNull { it.role == Role.USER } ?: return messages
         val originals = lastUser.attachments.filter { it.kind == com.iris.localai.data.AttachmentKind.IMAGE }.map { it.path }
         if (originals.isEmpty()) return messages
-        // 2.0.2: hand the model a scaled copy (2.1.1: per engine; MNN 512 px, others 1024 px).
-        val side = com.iris.localai.util.VisionPrompt.maxSide(ready.details.visionMaxSide)
+        // 2.0.2: hand the model a scaled copy (2.1.1: per engine; 2.1.7: 「识图清晰度」 384/512/1024, MNN capped at 512).
+        val side = com.iris.localai.util.VisionPrompt.maxSide(ready.details.visionMaxSide, c.settings.current.visionSide)
         val imgs = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             originals.map { com.iris.localai.util.Attachments.visionCopy(it, side) }
         }
@@ -1453,7 +1469,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         val prefix = if (details?.thinkingPrefilled == true && !disableThinking) "<think>" else ""
         val history = c.agent.history
         val memoryOn = c.agent.memorySettings.current.enabled
-        val tools = com.iris.localai.agent.AgentTools.enabled(ag, history != null, memoryOn, c.agent.knowledge.nonEmptyCached())
+        val tools = com.iris.localai.agent.AgentTools.enabled(ag, history != null, memoryOn, c.agent.knowledge.nonEmptyCached(), c.agent.imageGenOnCached())
         val ctxTokens = details?.contextLength?.takeIf { it > 0 } ?: eff.contextLength
         val maxNew = minOf(eff.maxNewTokens, AGENT_MAX_NEW)
         val sampling = c.engine.samplingFor(disableThinking).copy(maxNewTokens = maxNew, contextShift = false)
@@ -1654,7 +1670,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
             _permissionAsk.value?.let { it.answer.cancel(); _permissionAsk.value = null }
             timer.finish()
             val o = outcome
-            val finalText = (o?.finalText ?: (_stream.value?.text ?: "")).trim()
+            // 2.1.7: pictures made by generate_image join the reply as ![](images/IMG_….png) (unless already shown).
+            val finalText = com.iris.localai.agent.StepImages.appendTo((o?.finalText ?: (_stream.value?.text ?: "")).trim(), steps)
             val finalSteps = steps.map { st ->
                 if (st.status == com.iris.localai.agent.StepStatus.RUNNING || st.status == com.iris.localai.agent.StepStatus.ASKING)
                     st.copy(status = com.iris.localai.agent.StepStatus.ERROR, result = if (cancelled) "已停止" else "未完成")
@@ -1742,7 +1759,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         if (t != null && t.convId == conv.id && conv.messages.lastOrNull()?.id == t.anchorId) return t.messages
         val ag = c.agent.settings.current
         val memoryOn = c.agent.memorySettings.current.enabled
-        val tools = com.iris.localai.agent.AgentTools.enabled(ag, c.agent.history != null, memoryOn, c.agent.knowledge.nonEmptyCached())
+        val tools = com.iris.localai.agent.AgentTools.enabled(ag, c.agent.history != null, memoryOn, c.agent.knowledge.nonEmptyCached(), c.agent.imageGenOnCached())
         val eff = c.engine.effective()
         val maxNew = minOf(eff.maxNewTokens, AGENT_MAX_NEW)
         freezeMemory(agentMode = true)

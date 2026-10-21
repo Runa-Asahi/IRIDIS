@@ -259,6 +259,8 @@ fun ModelBackendPage(vm: SettingsViewModel, onBack: () -> Unit, onModels: () -> 
                 Divider()
                 DefaultModelRow(vm, s.defaultModelFile)
                 Divider()
+                VisionQualityRow(vm, s.visionSide)
+                Divider()
                 SettingsRow("立即重新加载模型", icon = com.iris.localai.ui.icons.IrisIcons.Reload, subtitle = "让需要重新加载才生效的修改马上生效", onClick = { vm.reloadModel() })
             }
 
@@ -1000,4 +1002,15 @@ private fun DefaultModelRow(vm: SettingsViewModel, current: String) {
             }
         }
     }
+}
+
+/** 2.1.7 「识图清晰度」: long side of the picture a vision model reads (快速 384 / 标准 512 / 清晰 1024). */
+@Composable
+private fun VisionQualityRow(vm: SettingsViewModel, current: Int) {
+    val options = com.iris.localai.util.VisionQuality.entries
+    SegmentedRow(
+        "识图清晰度", options.map { it.label }, com.iris.localai.util.VisionQuality.of(current).ordinal,
+        { i -> vm.setVisionSide(options[i].side) },
+        subtitle = "发图片时模型看到的尺寸：快速 384 px、标准 512 px、清晰 1024 px。越清晰预填充越慢；MNN 最多 512 px",
+    )
 }

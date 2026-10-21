@@ -98,3 +98,25 @@ if (IRIS_MNN)
     target_link_options(iris_mnn PRIVATE
             -Wl,--gc-sections -Wl,--icf=safe -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384)
 endif ()
+
+# ---- 生图: libiris_imagegen.so (QNN context-binary runner for SD1.5 on the Hexagon NPU) ----
+# Thin by design: loads libQnnHtp/libQnnSystem from the app's QNN runtime folder with dlopen and runs
+# AI Hub context binaries; the diffusion loop is Kotlin (imagegen/QnnSdEngine.kt). Nothing Qualcomm is
+# linked, so the library loads on every arm64 device. Needs only the QNN C API headers
+# (third_party/qnn-api, fetched by scripts/fetch-deps.sh, never committed); without them the target is skipped
+# and the app reports the NPU engine as unavailable.
+option(IRIS_IMAGEGEN "Build libiris_imagegen.so (QNN image generation runner)" ON)
+set(IRIS_QNN_API_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/qnn-api/include" CACHE PATH "QNN C API headers")
+if (IRIS_IMAGEGEN)
+    if (EXISTS "${IRIS_QNN_API_DIR}/QnnInterface.h")
+        add_library(iris_imagegen SHARED imagegen/qnn_imagegen.cpp)
+        target_compile_features(iris_imagegen PRIVATE cxx_std_17)
+        target_compile_options(iris_imagegen PRIVATE -O2 -fvisibility=hidden -Wall -Wextra)
+        target_include_directories(iris_imagegen PRIVATE ${IRIS_QNN_API_DIR})
+        target_link_libraries(iris_imagegen PRIVATE android log dl)
+        target_link_options(iris_imagegen PRIVATE
+                -Wl,--gc-sections -Wl,--icf=safe -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384)
+    else ()
+        message(WARNING "QNN headers not found at ${IRIS_QNN_API_DIR}: skipping libiris_imagegen.so (run scripts/fetch-deps.sh)")
+    endif ()
+endif ()

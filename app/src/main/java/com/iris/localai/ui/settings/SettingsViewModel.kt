@@ -138,6 +138,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     val installedModels = c.models.models
     fun refreshModels() = viewModelScope.launch { c.models.refresh() }
     fun setDefaultModel(fileName: String) { update { it.copy(defaultModelFile = fileName) } }
+    /** 2.1.7 「识图清晰度」 (px; takes effect with the next picture, no reload). */
+    fun setVisionSide(side: Int) { update { it.copy(visionSide = com.iris.localai.util.VisionQuality.of(side).side) } }
 
     fun deleteAllConversations() = viewModelScope.launch { c.conversations.deleteAll() }
 

@@ -4,6 +4,8 @@
 #   - sherpa-onnx Android AAR (speech recognition / synthesis / VAD)
 #   - MNN prebuilt static lib for the full flavour (third_party/mnn; ~6 MB tar.gz, SHA-256 pinned).
 #     Pass --build-mnn to compile it from source instead (needs NDK r30, 15-30 min).
+#   - QNN 2.50 C API headers (third_party/qnn-api/include) for libiris_imagegen.so, taken from
+#     Qualcomm's geniex-qairt-plugin repo at a pinned commit (headers only; never committed here).
 # Re-running is safe: existing, verified copies are kept.
 set -eu
 cd "$(dirname "$0")/.."
@@ -58,5 +60,24 @@ else
     tar -xzf /tmp/mnn-prebuilt.tar.gz -C third_party
     grep -q "$MNN_COMMIT" third_party/mnn/VERSION || { echo "MNN: VERSION mismatch" >&2; exit 1; }
   fi
+fi
+# ---- QNN C API headers (libiris_imagegen.so) ----
+QNN_API_REPO="https://github.com/qualcomm/geniex-qairt-plugin"
+QNN_API_COMMIT="2c3d4fcd2e3c8c917da6308c1459ccf83086b29f"
+if [ -f third_party/qnn-api/include/QnnInterface.h ] && [ -f third_party/qnn-api/include/System/QnnSystemInterface.h ]; then
+  echo "qnn-api headers: present"
+else
+  echo "qnn-api headers: fetching geniex-qairt-plugin@$QNN_API_COMMIT"
+  rm -rf third_party/qnn-api third_party/.qnn-api.tmp
+  mkdir -p third_party/.qnn-api.tmp
+  git -C third_party/.qnn-api.tmp init --quiet
+  git -C third_party/.qnn-api.tmp remote add origin "$QNN_API_REPO"
+  git -C third_party/.qnn-api.tmp fetch --quiet --depth 1 origin "$QNN_API_COMMIT"
+  git -C third_party/.qnn-api.tmp checkout --quiet FETCH_HEAD
+  [ "$(git -C third_party/.qnn-api.tmp rev-parse HEAD)" = "$QNN_API_COMMIT" ] || { echo "qnn-api: commit mismatch" >&2; exit 1; }
+  mkdir -p third_party/qnn-api
+  cp -R third_party/.qnn-api.tmp/qnn-api/include third_party/qnn-api/include
+  rm -rf third_party/.qnn-api.tmp
+  [ -f third_party/qnn-api/include/QnnInterface.h ] || { echo "qnn-api: headers missing" >&2; exit 1; }
 fi
 echo "done"

@@ -16,8 +16,8 @@ import org.junit.Test
 class V216ReleaseTest {
     @Test fun version() {
         val gradle = listOf("app/build.gradle.kts", "build.gradle.kts").map { java.io.File(it) }.first { it.exists() }.readText()
-        assertTrue(gradle.contains("versionCode = 184"))
-        assertTrue(gradle.contains("versionName = \"2.1.6\""))
+        // 2.1.7: later releases only move forward.
+        assertTrue(Regex("versionCode = (\\d+)").find(gradle)!!.groupValues[1].toInt() >= 184)
     }
 
     private val plan = Plan("写周报", listOf(PlanStep("查资料"), PlanStep("写总结")))

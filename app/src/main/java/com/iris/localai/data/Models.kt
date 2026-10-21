@@ -325,6 +325,8 @@ data class AppSettings(
     // ---- 2.1.7 ----
     /** 「默认模型」: file name loaded by tapping the chat logo (and by auto-load); "" = 上次使用的模型. */
     val defaultModelFile: String = "",
+    /** 「识图清晰度」: long side (px) of the picture copy a vision model reads — 384 快速 / 512 标准 / 1024 清晰 ([com.iris.localai.util.VisionQuality]). */
+    val visionSide: Int = 512,
 )
 
 /** How a conversation's history is fitted into the model's context window. */
