@@ -45,6 +45,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -69,6 +71,8 @@ import com.iris.localai.ui.components.SliderRow
 import com.iris.localai.ui.components.SubpageScaffold
 import com.iris.localai.ui.components.SwitchRow
 import com.iris.localai.ui.components.irisTextFieldColors
+import com.iris.localai.server.ApiAuth
+import com.iris.localai.ui.icons.IrisIcons
 import com.iris.localai.ui.theme.Iris
 import com.iris.localai.ui.theme.IrisDimens
 import com.iris.localai.ui.motion.IrisMotion
@@ -330,30 +334,55 @@ fun ApiPage(vm: SettingsViewModel, onBack: () -> Unit) {
             }
 
             SectionTitle("API Key")
+            // 2.1.7 API 可自定 Key: type your own (or 生成随机); set → clients send `Authorization: Bearer <key>` or `x-api-key`.
+            var keyText by rememberSaveable(s.apiKey) { mutableStateOf(s.apiKey) }
+            var keyVisible by rememberSaveable { mutableStateOf(false) }
+            val keyDirty = ApiAuth.sanitizeKey(keyText) != s.apiKey
+            fun applyKey() { vm.setApiKey(keyText); focus.clearFocus() }
             SettingsGroup {
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = IrisDimens.rowMinHeight).padding(start = IrisDimens.rowPadding, end = IrisDimens.space4),
+                    Modifier.fillMaxWidth().heightIn(min = IrisDimens.rowMinHeight).padding(start = IrisDimens.rowPadding, end = IrisDimens.space4, top = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    SelectionContainer(Modifier.weight(1f).padding(vertical = 12.dp)) {
-                        Text(
-                            s.apiKey.ifBlank { "未设置 · 只在本机用可以不设" },
-                            style = if (s.apiKey.isBlank()) IrisType.secondary else IrisType.mono,
-                            color = if (s.apiKey.isBlank()) c.textTertiary else c.text,
-                        )
-                    }
+                    OutlinedTextField(
+                        keyText, { v -> keyText = ApiAuth.sanitizeKey(v) },
+                        singleLine = true,
+                        placeholder = { Text("未设置 · 只在本机用可以不设", style = IrisType.secondary, color = c.textTertiary) },
+                        textStyle = IrisType.mono.copy(color = c.text),
+                        visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        shape = IrisRadius.mediumShape,
+                        colors = irisTextFieldColors(),
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done, autoCorrectEnabled = false),
+                        keyboardActions = KeyboardActions(onDone = { applyKey() }),
+                    )
+                    PressableIcon(
+                        if (keyVisible) IrisIcons.EyeOff else IrisIcons.Eye, if (keyVisible) "隐藏" else "显示",
+                        iconSize = 18.dp, tint = c.textSecondary,
+                    ) { keyVisible = !keyVisible }
                     if (s.apiKey.isNotBlank()) {
-                        PressableIcon(Icons.Outlined.ContentCopy, "复制", iconSize = 18.dp, tint = c.textSecondary, haptic = true) {
+                        PressableIcon(IrisIcons.Copy, "复制", iconSize = 18.dp, tint = c.textSecondary, haptic = true) {
                             clipboard.setText(AnnotatedString(s.apiKey))
                         }
                     }
-                    PressableIcon(Icons.Outlined.Refresh, "重新生成", iconSize = 18.dp, tint = c.textSecondary, onClick = vm::regenerateKey)
+                }
+                Row(Modifier.fillMaxWidth().padding(start = IrisDimens.space8, end = IrisDimens.space8, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IrisButton("生成随机", { vm.regenerateKey(); keyVisible = true }, style = IrisButtonStyle.Text, compact = true, icon = IrisIcons.Reload)
+                    Spacer(Modifier.weight(1f))
+                    IrisButton(
+                        "保存", ::applyKey, style = IrisButtonStyle.Text, compact = true,
+                        enabled = keyDirty && (keyText.isNotBlank() || !s.apiAllowLan),
+                    )
                 }
                 if (s.apiKey.isNotBlank() && !s.apiAllowLan) {
                     Divider()
                     SettingsRow("清除 API Key", titleColor = c.danger, onClick = vm::clearKey)
                 }
             }
+            GroupFootnote(
+                if (s.apiKey.isBlank()) "不设 Key 时本机 App 可直接调用，浏览器网页会被拒绝。"
+                else "调用时带上请求头 Authorization: Bearer <Key>（或 x-api-key: <Key>），否则返回 401。",
+            )
 
             AnimatedVisibility(
                 visible = status.running && status.addresses.isNotEmpty(),

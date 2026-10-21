@@ -369,6 +369,12 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         update { it.copy(apiKey = newKey()) }
     }
 
+    /** 2.1.7: user-typed key (saved as typed, header-safe chars only). Blank on the LAN keeps the old key. */
+    fun setApiKey(raw: String) {
+        val k = com.iris.localai.server.ApiAuth.sanitizeKey(raw)
+        update { if (k.isEmpty() && it.apiAllowLan) it else it.copy(apiKey = k) }
+    }
+
     fun clearKey() {
         // A key is mandatory on the LAN.
         update { if (it.apiAllowLan) it else it.copy(apiKey = "") }

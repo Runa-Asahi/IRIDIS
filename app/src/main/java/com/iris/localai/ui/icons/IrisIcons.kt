@@ -86,6 +86,9 @@ object IrisIcons {
     /** 视觉效果 */
     val Eye: ImageVector by lazy { icon("Eye", "M2.5 12C4.8 7.6 8.1 5.5 12 5.5s7.2 2.1 9.5 6.5c-2.3 4.4-5.6 6.5-9.5 6.5S4.8 16.4 2.5 12z M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z") }
 
+    /** 2.1.7: 隐藏 (API Key show/hide) — the eye, struck through. */
+    val EyeOff: ImageVector by lazy { icon("EyeOff", "M2.5 12C4.8 7.6 8.1 5.5 12 5.5s7.2 2.1 9.5 6.5c-2.3 4.4-5.6 6.5-9.5 6.5S4.8 16.4 2.5 12z M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6z M4 4l16 16") }
+
     /** 存储空间 (1.14.3): a storage cylinder, three stacked platters. */
     val Storage: ImageVector by lazy { icon("Storage", "M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3z M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6 M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3") }
 

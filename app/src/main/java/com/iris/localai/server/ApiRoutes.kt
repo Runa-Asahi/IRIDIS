@@ -29,7 +29,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
-import java.security.MessageDigest
 import java.util.UUID
 
 /**
@@ -81,18 +80,8 @@ class ApiRoutes(
     }
 
     private fun authorize(req: HttpRequest) {
-        val key = settings.current.apiKey.trim()
-        // 1.13.0: without a key, a web page in the phone's browser must not drive the local API.
-        if (key.isEmpty()) {
-            val origin = req.headers["origin"]?.trim().orEmpty()
-            if (origin.isNotEmpty() && origin != "null") throw HttpError(403, "browser requests need an API key (设置 › API 服务)")
-            return
-        }
-        val header = req.headers["authorization"]?.trim().orEmpty()
-        val given = if (header.startsWith("Bearer ", ignoreCase = true)) header.substring(7).trim() else header
-        if (!MessageDigest.isEqual(given.toByteArray(Charsets.UTF_8), key.toByteArray(Charsets.UTF_8))) {
-            throw HttpError(401, "invalid or missing API key")
-        }
+        // 2.1.7: custom key; Bearer or x-api-key. Empty key = no auth (browser pages still refused).
+        ApiAuth.check(settings.current.apiKey, req.headers)?.let { throw it }
     }
 
     private suspend fun listModels(res: HttpResponder, ollama: Boolean) {
