@@ -615,6 +615,7 @@ fun ChatScreen(
             cpuFaster = { m -> com.iris.localai.engine.CpuFasterHint.shouldShow(loadRecords.values, m.id, vm.preferredBackendLabel(m)) },
             onSwitchToCpu = vm::switchModelToCpu,
             engineTag = { m -> vm.engineTag(m) },
+            onCancelLoad = vm::cancelLoad,
         )
     }
     configureModel?.let { m -> com.iris.localai.ui.models.ModelConfigSheet(m, onDismiss = { configureModel = null }) }

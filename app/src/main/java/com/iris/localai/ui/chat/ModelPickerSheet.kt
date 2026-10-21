@@ -28,6 +28,7 @@ import com.iris.localai.engine.EngineState
 import com.iris.localai.ui.components.EmptyState
 import com.iris.localai.ui.components.IrisButton
 import com.iris.localai.ui.components.IrisButtonStyle
+import androidx.compose.foundation.layout.Arrangement
 import com.iris.localai.ui.components.IrisProgressBar
 import com.iris.localai.ui.components.IrisSheet
 import com.iris.localai.ui.components.SheetHeader
@@ -59,6 +60,8 @@ fun ModelPickerSheet(
     onSwitchToCpu: (LocalModel) -> Unit = {},
     /** 2.2.0: 「GenieX · NPU」 for models GenieX runs (null = the format label + backend). */
     engineTag: (LocalModel) -> String? = { null },
+    /** 2.1.7 弹窗可取消: 「取消」 on the loading block (abandons the load; a tier reload is never cancelled). */
+    onCancelLoad: () -> Unit = {},
 ) {
     val c = Iris.colors
     IrisSheet(onDismiss = onDismiss) {
@@ -88,6 +91,11 @@ fun ModelPickerSheet(
                 }
                 Spacer(Modifier.height(IrisDimens.space8))
                 IrisProgressBar(progress = l.progress.takeIf { it > 0.01f && it <= 1f })
+                if (l.applyingTier == null) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        IrisButton("取消", onCancelLoad, style = IrisButtonStyle.Text, compact = true)
+                    }
+                }
             }
         }
         com.iris.localai.ui.components.SegmentedRow(

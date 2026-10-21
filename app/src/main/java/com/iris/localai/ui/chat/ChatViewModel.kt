@@ -191,7 +191,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
     private fun act(label: String?) { if (_activity.value?.label != label) _activity.value = label?.let { com.iris.localai.util.Activity(it) } }
 
     /** 1.10.9: 「取消加载」. */
-    fun cancelLoad() { c.engine.cancelLoad() }
+    /**
+     * 2.1.7 弹窗可取消: abandon the running load (the engine releases it when the native call
+     * returns) and cancel our own load coroutine, so a load queued behind it never starts either.
+     */
+    fun cancelLoad() {
+        c.engine.cancelLoad()
+        loadJob?.cancel(); loadJob = null
+    }
 
     private val _replyStatus = MutableStateFlow<String?>(null)
     val replyStatus: StateFlow<String?> = _replyStatus.asStateFlow()
@@ -363,10 +370,28 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
 
     /** 1.10.2: load telemetry for the model sheet. */
     val loadStats = c.engine.loadStats.records
-    fun loadModel(model: LocalModel) = viewModelScope.launch {
+    /** 2.1.7: the load started from this screen (picker / logo), cancellable by 「取消」. */
+    private var loadJob: Job? = null
+    fun loadModel(model: LocalModel): Job = viewModelScope.launch {
         if (genJob?.isActive == true) { notice.value = "正在回复，停止后再切换模型"; return@launch }
         c.engine.load(model)
+    }.also { loadJob = it }
+    /**
+     * 2.1.7: tap on the chat logo → load 「默认模型」 (设置 › 模型与后端; none = the last used one).
+     * Does nothing while a model is loaded or loading (or a reply runs).
+     */
+    fun loadDefaultModel() {
+        val st = c.engine.state.value
+        if (st is EngineState.Ready || st is EngineState.Loading || genJob?.isActive == true) return
+        val m = c.engine.defaultModel()
+        if (m != null) { loadModel(m); return }
+        viewModelScope.launch {
+            c.models.refresh()
+            val again = c.engine.defaultModel()
+            if (again != null) loadModel(again) else notice.value = "还没有可用的模型，点击顶部选择或导入"
+        }
     }
+
     fun unloadModel() = viewModelScope.launch {
         if (genJob?.isActive == true) { notice.value = "正在回复，停止后再卸载模型"; return@launch }
         c.engine.unload()
