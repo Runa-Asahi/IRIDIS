@@ -321,6 +321,10 @@ data class AppSettings(
     val backgroundBlur: Int = 0,
     /** 遮罩深浅: % of the theme background laid over the picture (0–90). */
     val backgroundScrim: Int = 40,
+
+    // ---- 2.1.7 ----
+    /** 「默认模型」: file name loaded by tapping the chat logo (and by auto-load); "" = 上次使用的模型. */
+    val defaultModelFile: String = "",
 )
 
 /** How a conversation's history is fitted into the model's context window. */

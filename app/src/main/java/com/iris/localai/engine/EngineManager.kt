@@ -281,15 +281,23 @@ class EngineManager(
         }
     }
 
-    suspend fun load(model: LocalModel, reason: String = "选择模型"): Boolean = lifecycle.withLock {
-        // 1.10.2: the resident model is never reloaded by a plain load (same model = same backend
-        // choice; a different backend / context only reloads through reload()).
-        if (ReloadRules.alreadyLoaded(state.value, model.path)) {
-            Log.i(LoadTelemetry.TAG, "load skipped ($reason): ${model.fileName} is already loaded")
-            return true
+    /** 2.1.7: the load running / queued now; a message sent meanwhile waits for it ([ensureLoaded]). */
+    private val inFlight = InFlightLoad()
+
+    /** 2.1.7: the model of the load in flight (null = none). */
+    val loadingModelPath: String? get() = inFlight.current()?.key
+
+    suspend fun load(model: LocalModel, reason: String = "选择模型"): Boolean = inFlight.run(model.path) {
+        lifecycle.withLock {
+            // 1.10.2: the resident model is never reloaded by a plain load (same model = same backend
+            // choice; a different backend / context only reloads through reload()).
+            if (ReloadRules.alreadyLoaded(state.value, model.path)) {
+                Log.i(LoadTelemetry.TAG, "load skipped ($reason): ${model.fileName} is already loaded")
+                return@withLock true
+            }
+            cancelAll()
+            loadLocked(model, applyingTier = null, reason = reason)
         }
-        cancelAll()
-        loadLocked(model, applyingTier = null, reason = reason)
     }
 
     /**
@@ -509,14 +517,25 @@ class EngineManager(
 
     /** Loads the last used model if nothing is loaded (used by auto-load and the API). */
     suspend fun ensureLoaded(preferredFileName: String? = null): Boolean {
-        if (preferredFileName == null && state.value is EngineState.Ready) return true
+        if (preferredFileName == null) {
+            // 2.1.7: a load is running (any model) → wait for it and answer with that model; never
+            // cancel it to reload the previously used one. Follows a newer load started meanwhile.
+            val awaited = inFlight.awaitInFlight()
+            if (awaited != null) return awaited && state.value is EngineState.Ready
+            if (state.value is EngineState.Ready) return true
+        }
         models.refresh()
         val target = models.find(preferredFileName)
             ?: readyModel
-            ?: models.find(settings.current.lastModelFile)
+            ?: defaultModel()
             ?: return false
         return load(target, reason = "按需加载")
     }
+
+    /** 2.1.7 「默认模型」: the chosen default if still installed, else the last used model. */
+    fun defaultModel(): LocalModel? =
+        settings.current.defaultModelFile.takeIf { it.isNotBlank() }?.let { models.find(it) }
+            ?: models.find(settings.current.lastModelFile)
 
     /**
      * Sampling for the loaded model: its own settings over the global defaults, and the resource
@@ -738,6 +757,8 @@ class EngineManager(
         abandonedLoad = st.since
         Log.i(LoadTelemetry.TAG, "load cancelled by user: ${st.model.fileName} after ${(System.currentTimeMillis() - st.since) / 1000}s")
         _state.value = EngineState.Idle
+        // 2.1.7: a message waiting for this load is released now (not when the native call returns).
+        inFlight.current()?.let { inFlight.end(it, false) }
         _notices.tryEmit(LoadCancel.NOTICE)
         return true
     }
