@@ -42,6 +42,7 @@ data class VoiceUiState(
 internal class FrameRing(private val capacity: Int) {
     private val frames = ArrayDeque<FloatArray>(capacity)
     fun add(f: FloatArray) { if (frames.size == capacity) frames.removeFirst(); frames.addLast(f) }
+    fun clear() = frames.clear()
     fun snapshot(): FloatArray {
         val out = FloatArray(frames.sumOf { it.size })
         var o = 0
@@ -76,12 +77,15 @@ class VoiceController(
     @Volatile private var replyJob: Job? = null
     @Volatile private var player: PcmPlayer? = null
     @Volatile private var muted = false
+    /** 2.1.8: recent TTS text, to drop recognised echo of it. Touched from mic, ASR and TTS coroutines. */
+    private val echoText = SyncEchoTextGuard()
 
     val isRunning: Boolean get() = session?.isActive == true
 
     fun start() {
         if (isRunning) return
         _state.value = VoiceUiState()
+        echoText.clear()
         synthesizer.claim(this) { stop() }
         session = scope.launch {
             try {
@@ -143,8 +147,8 @@ class VoiceController(
             val preroll = FrameRing(PREROLL_FRAMES)  // the start of what the user says over the reply
             var prefix: FloatArray? = null            // pre-roll kept for the utterance after a barge-in
             var outPeak = 0f          // decaying peak of our own playback level
-            var wasReplying = false
-            var tailUntil = 0L        // ignore the mic briefly after playback (room echo tail)
+            val gate = HalfDuplexGate() // 2.1.8: mic closed while our voice is on the loudspeaker (+ tail)
+            var lastAction = MicAction.LISTEN
             try {
                 Microphone.frames().collect { frame ->
                     if (muted) {
@@ -156,13 +160,28 @@ class VoiceController(
                     val outLevel = out.level
                     outPeak = maxOf(outLevel, outPeak * 0.9f)
                     _state.update { it.copy(micLevel = mic, outputLevel = outLevel) }
+                    val replying = phase == VoicePhase.SPEAKING || phase == VoicePhase.THINKING
+                    val audible = phase == VoicePhase.SPEAKING || outLevel > 0f
+                    val now = System.currentTimeMillis()
+                    if (audible) echoText.touch(now)
+                    val action = gate.decide(
+                        nowMs = now, replying = replying, audible = audible,
+                        route = if (audible) out.route() else OutputRoute.LOUDSPEAKER,
+                        residualMs = if (audible) 0L else out.queuedMs(),
+                    )
+                    val prev = lastAction
+                    lastAction = action
+                    if (action == MicAction.MUTED) {
+                        // Half-duplex: nothing of what the mic hears now reaches VAD / ASR / barge-in.
+                        if (prev != MicAction.MUTED) { vad.clear(); detector.reset(); preroll.clear(); prefix = null }
+                        return@collect
+                    }
+                    if (prev == MicAction.MUTED) vad.clear() // start clean once the gate opens
                     vad.acceptWaveform(frame)
                     preroll.add(frame)
                     val talking = vad.isSpeechDetected()
-                    val replying = phase == VoicePhase.SPEAKING || phase == VoicePhase.THINKING
 
-                    if (replying) {
-                        wasReplying = true
+                    if (action == MicAction.BARGE_IN_ONLY) {
                         val prob = probe?.let { runCatching { it.compute(frame) }.getOrNull() } ?: if (talking) 1f else 0f
                         if (detector.onFrame(mic, outPeak, prob)) {
                             Log.i(TAG, "barge-in (coupling=${detector.coupling})")
@@ -172,8 +191,6 @@ class VoiceController(
                             interruptReply()
                             prefix = preroll.snapshot()
                             vad.clear()
-                            wasReplying = false
-                            tailUntil = 0L
                             _state.update { it.copy(phase = VoicePhase.LISTENING, awaitingAudio = false, bargeIns = it.bargeIns + 1) }
                         } else {
                             if (!talking) vad.clear() // drop finished (echo) segments, keep a live one
@@ -181,14 +198,6 @@ class VoiceController(
                         }
                     } else {
                         detector.reset()
-                        if (wasReplying) {
-                            wasReplying = false
-                            tailUntil = System.currentTimeMillis() + ECHO_TAIL_MS
-                        }
-                        if (System.currentTimeMillis() < tailUntil) {
-                            vad.clear()
-                            return@collect
-                        }
                     }
                     while (!vad.empty()) {
                         val seg = vad.front().samples
@@ -219,6 +228,12 @@ class VoiceController(
                 ""
             }
             if (text.isBlank()) {
+                _state.update { it.copy(phase = VoicePhase.LISTENING) }
+                continue
+            }
+            // Second layer: the recogniser heard (a near copy of) what we just said → it is our echo.
+            if (echoText.isEcho(text, System.currentTimeMillis())) {
+                Log.i(TAG, "dropped echo of own reply: $text")
                 _state.update { it.copy(phase = VoicePhase.LISTENING) }
                 continue
             }
@@ -287,6 +302,7 @@ class VoiceController(
             for (sentence in sentences) {
                 val speakable = SpeechText.speakable(sentence)
                 if (speakable.none { it.isLetterOrDigit() }) continue
+                echoText.remember(speakable, System.currentTimeMillis())
                 try {
                     synthesizer.speak(speakable, s.ttsSpeakerId, s.ttsSpeed) { chunk ->
                         pcm.trySend(chunk.copyOf())
@@ -304,6 +320,7 @@ class VoiceController(
         producer.join()
         // Stay in SPEAKING (barge-in armed, mic gated) until the last syllable has actually played.
         out.drain()
+        echoText.touch(System.currentTimeMillis())
         _state.update { it.copy(phase = VoicePhase.LISTENING, outputLevel = 0f, awaitingAudio = false) }
     }
 
@@ -318,8 +335,15 @@ class VoiceController(
         const val TAG = "VoiceController"
         /** 20 × 32 ms ≈ 0.64 s of audio kept from before a barge-in was recognised. */
         const val PREROLL_FRAMES = 20
-        const val ECHO_TAIL_MS = 400L
         /** Below this much audio left in the track, a gap is imminent. */
         const val GAP_MS = 60L
     }
+}
+
+/** Thread-safe wrapper: the guard is fed by the TTS coroutine and read by the ASR loop. */
+internal class SyncEchoTextGuard(private val g: EchoTextGuard = EchoTextGuard()) {
+    @Synchronized fun remember(text: String, nowMs: Long) = g.remember(text, nowMs)
+    @Synchronized fun touch(nowMs: Long) = g.touch(nowMs)
+    @Synchronized fun isEcho(heard: String, nowMs: Long): Boolean = g.isEcho(heard, nowMs)
+    @Synchronized fun clear() = g.clear()
 }

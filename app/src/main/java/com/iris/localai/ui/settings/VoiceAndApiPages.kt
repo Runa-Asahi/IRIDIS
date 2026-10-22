@@ -188,7 +188,7 @@ fun VoicePage(vm: SettingsViewModel, onBack: () -> Unit) {
                             0 -> "低：要说得更大声、更久才打断，适合嘈杂环境"
                             2 -> "高：轻声也能打断，偶尔会被回复声误触"
                             else -> "中：正常音量说话即可打断"
-                        },
+                        } + "。外放时为防止自问自答，说话不打断，点光球打断；戴耳机或用听筒时生效",
                     )
                     Divider()
                     SwitchRow(

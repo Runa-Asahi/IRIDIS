@@ -20,7 +20,8 @@ import kotlin.math.sqrt
 /**
  * Microphone as a cold Flow of VAD-sized float frames (16 kHz mono).
  * Uses the VOICE_COMMUNICATION source so the platform echo canceller removes our own TTS
- * playback — that is what makes barge-in (talking over the assistant) work on a speakerphone.
+ * playback. On the loudspeaker that is not enough (2.1.8): see [HalfDuplexGate], which keeps the
+ * mic away from VAD/ASR while the reply plays there; voice barge-in stays for headset / earpiece.
  * The recorder only exists while the flow is collected.
  */
 object Microphone {
@@ -203,6 +204,23 @@ class PcmPlayer(private val sampleRate: Int, voiceCommunication: Boolean = false
             track.playbackHeadPosition.toLong() and 0xFFFFFFFFL
         }
         return ((headBase + written - head).coerceAtLeast(0L)) * 1000L / sampleRate
+    }
+
+    @Volatile private var routeAt = 0L
+    @Volatile private var routeCache = OutputRoute.LOUDSPEAKER
+
+    /**
+     * Where the reply is actually playing (2.1.8 echo gate). Re-read at most every 500 ms; an
+     * unrouted / unknown device counts as the loudspeaker, the safe side for half-duplex.
+     */
+    fun route(): OutputRoute {
+        val now = System.currentTimeMillis()
+        if (now - routeAt < 500L) return routeCache
+        routeAt = now
+        val type = synchronized(lock) {
+            if (released) null else runCatching { track.routedDevice?.type }.getOrNull()
+        }
+        return OutputRoute.of(type).also { routeCache = it }
     }
 
     /** Immediately silence output (barge-in). */
