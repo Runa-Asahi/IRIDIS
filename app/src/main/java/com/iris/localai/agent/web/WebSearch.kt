@@ -1,6 +1,9 @@
 package com.iris.localai.agent
 
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import java.net.URLDecoder
 import java.net.URLEncoder
 
@@ -42,7 +45,7 @@ object WebSearchTool : AgentTool {
     override val defaultPermission: Permission = Permission.ALLOW
 
     override fun run(args: JsonObject, env: ToolEnv): ToolResult {
-        val q = Args.str(args, "query", "q", "keywords", "keyword", "text", "search")?.trim()
+        val q = query(args)?.trim()
             ?: throw IllegalArgumentException("缺少参数 query")
         if (q.isEmpty()) throw IllegalArgumentException("缺少参数 query")
         val news = Args.bool(args, "news") ?: SearchText.looksLikeNews(q)
@@ -68,6 +71,18 @@ object WebSearchTool : AgentTool {
     }
 
     private fun isZh(s: String) = s.any { it.code > 0x2E80 }
+
+    private val QUERY_KEYS = arrayOf("query", "q", "keywords", "keyword", "text", "search")
+
+    /** 2.1.8: the query; a list of words (`"query": ["三体", "小说"]`) is joined with spaces. */
+    internal fun query(args: JsonObject): String? = QUERY_KEYS.firstNotNullOfOrNull { k ->
+        when (val v = args[k]) {
+            is JsonArray -> v.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p !is JsonNull }?.content?.trim() }
+                .filter { it.isNotEmpty() }.joinToString(" ").ifEmpty { null }
+            is JsonPrimitive -> v.takeIf { it !is JsonNull }?.content
+            else -> null
+        }
+    }
 
     private fun ok(q: String, engine: String, hits: List<SearchHit>, notice: String?, env: ToolEnv, blocked: String? = null): ToolResult {
         val text = (notice?.let { "$it\n" } ?: "") + SearchText.render(q, hits)

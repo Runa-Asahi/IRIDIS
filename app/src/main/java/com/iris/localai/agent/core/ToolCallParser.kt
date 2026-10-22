@@ -76,6 +76,10 @@ object ToolCallParser {
                 i++; continue
             }
             if (ch == '"') { inStr = true; out.append(ch); i++; continue }
+            // 2.1.8: bare value right after `:` (`query: 诡秘之主 小说`) → one quoted string
+            if (out.trimEnd().lastOrNull() == ':') {
+                JsonRepair.bareValue(t, i)?.let { (q, end) -> out.append(q); i = end; continue }
+            }
             // bare key right after { or , → quoted
             if ((ch.isLetter() || ch == '_') && out.trimEnd().lastOrNull().let { it == '{' || it == ',' }) {
                 var j = i
@@ -485,9 +489,50 @@ object JsonRepair {
     /** Parses [raw] as is, then once more after [repair]; null when both fail. */
     fun parse(raw: String, json: Json): JsonElement? {
         // 1.10.8: lenient mode would read “curly” quotes as part of unquoted strings — repair first.
-        if ('“' in raw) runCatching { json.parseToJsonElement(repair(raw)) }.getOrNull()?.let { return it }
+        // 2.1.8: same for 'single quotes' outside "strings": lenient keeps them as part of the value
+        // ({"query": '三体'} → `'三体'`), and {'tool': …} must parse too.
+        if ('“' in raw || singleQuoteOutside(raw)) runCatching { json.parseToJsonElement(repair(raw)) }.getOrNull()?.let { return it }
         return runCatching { json.parseToJsonElement(raw) }.getOrNull()
             ?: runCatching { json.parseToJsonElement(repair(raw)) }.getOrNull()
+    }
+
+    /** True when a `'` appears outside double-quoted strings. */
+    internal fun singleQuoteOutside(s: String): Boolean {
+        var inStr = false; var esc = false
+        for (ch in s) {
+            if (inStr) {
+                when { esc -> esc = false; ch == '\\' -> esc = true; ch == '"' -> inStr = false }
+            } else if (ch == '"') inStr = true else if (ch == '\'') return true
+        }
+        return false
+    }
+
+    private val LITERAL = Regex("^(?:-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?|true|false|null|True|False|None)$")
+
+    /**
+     * 2.1.8: a bare (unquoted) value starting at [i] — `诡秘之主 小说` in `"query": 诡秘之主 小说}` —
+     * read up to the next `,` or `}` and returned as one JSON string with the index after it.
+     * Null when [i] starts a string, object, array, number or true/false/null.
+     */
+    internal fun bareValue(s: String, i: Int): Pair<String, Int>? {
+        if (i >= s.length) return null
+        val c = s[i]
+        if (c.isWhitespace() || c in "\"'“{[,}]") return null
+        var j = i
+        while (j < s.length && s[j] != ',' && s[j] != '}') j++
+        val raw = s.substring(i, j).trimEnd()
+        if (raw.isEmpty() || LITERAL.matches(raw)) return null
+        return JsonPrimitive(raw).toString() to (i + raw.length)
+    }
+
+    /**
+     * A closing `"`: followed (after spaces) by the end or what may follow a string — `,` `}` `]`
+     * `:`, the separators [repair] fixes (`;` `=` `：` `，`) or the next `"`.
+     */
+    private fun closesString(s: String, i: Int): Boolean {
+        var j = i + 1
+        while (j < s.length && (s[j] == ' ' || s[j] == '\t' || s[j] == '\r' || s[j] == '\n')) j++
+        return j >= s.length || s[j] in ",}]:;=：，\""
     }
 
     /**
@@ -504,12 +549,16 @@ object JsonRepair {
         val stack = ArrayList<Char>()
         var expectKey = false     // inside an object, before a key
         var afterKey = false      // a key string just closed; next is its separator
+        var expectValue = false   // 2.1.8: right after a key's `:`
         while (i < s.length) {
             val ch = s[i]
             if (quote != null) {
                 when {
                     esc -> { esc = false; out.append(ch) }
                     ch == '\\' -> { esc = true; out.append(ch) }
+                    // 2.1.8: an unescaped `"` inside a "value" (`""三体" 小说"`) is kept when what
+                    // follows cannot come after a string
+                    ch == '"' && quote == '"' && !closesString(s, i) -> out.append("\\\"")
                     ch == quote -> {
                         quote = null; out.append('"')
                         if (expectKey && stack.lastOrNull() == '{') { afterKey = true; expectKey = false }
@@ -523,13 +572,20 @@ object JsonRepair {
                 }
             } else {
                 if (!ch.isWhitespace() && afterKey && ch != ':' && ch != ';' && ch != '=' && ch != '：') afterKey = false
+                if (expectValue && !ch.isWhitespace()) {
+                    expectValue = false
+                    val bare = bareValue(s, i)
+                    if (bare != null) { out.append(bare.first); i = bare.second; continue }
+                }
                 when {
                     ch == '"' || ch == '\'' -> { quote = ch; out.append('"') }
                     ch == '“' -> { quote = '”'; out.append('"') }
                     ch == '{' -> { stack.add('{'); expectKey = true; out.append(ch) }
                     ch == '[' -> { stack.add('['); expectKey = false; out.append(ch) }
                     ch == '}' || ch == ']' -> { if (stack.isNotEmpty()) stack.removeAt(stack.size - 1); expectKey = false; out.append(ch) }
-                    ch == ':' || ((ch == ';' || ch == '=' || ch == '：') && afterKey) -> { afterKey = false; out.append(':') }
+                    ch == ':' || ((ch == ';' || ch == '=' || ch == '：') && afterKey) -> {
+                        afterKey = false; expectValue = stack.lastOrNull() == '{'; out.append(':')
+                    }
                     ch == ';' || ch == '，' -> { expectKey = stack.lastOrNull() == '{'; out.append(',') }
                     ch == ',' -> {
                         expectKey = stack.lastOrNull() == '{'
