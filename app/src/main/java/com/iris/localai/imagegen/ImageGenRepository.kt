@@ -182,21 +182,28 @@ class ImageGenEngines private constructor(private val context: Context) : ImageG
             dir == null -> UnavailableEngine("缺少 QNN 运行库：请先在 设置 › 模型与后端 安装 NPU 运行库")
             !(probe.backendOk && probe.deviceOk) -> UnavailableEngine("QNN 后端初始化失败：${probe.error ?: "?"}")
             else -> synchronized(this) {
-                qnn ?: QnnSdEngine(modelDir = { repo.downloadedDir(it) }, loader = NativeQnnGraphLoader(dir)).also { qnn = it }
+                qnn ?: QnnSdEngine(modelDir = { repo.downloadedDir(it) }, loader = NativeQnnGraphLoader(dir), perf = NativeHtpPerf).also { qnn = it }
             }
         }
     }
 
-    override suspend fun generate(req: ImageRequest, model: ImageModel, onProgress: (step: Int, total: Int) -> Unit): Result<ByteArray> {
-        val e = runCatching { engineFor(model) }.getOrElse { return Result.failure(it) }
-        active = e
-        return try { e.generate(req, model, onProgress) } finally { if (active === e) active = null }
-    }
+    /** Frees the NPU graphs [IdleReleaser.DEFAULT_TIMEOUT_MS] after the last generation (page or generate_image). */
+    private val idle = IdleReleaser { release() }
+
+    override suspend fun generate(req: ImageRequest, model: ImageModel, onProgress: (step: Int, total: Int) -> Unit): Result<ByteArray> =
+        idle.track {
+            val e = runCatching { engineFor(model) }.getOrElse { return@track Result.failure(it) }
+            active = e
+            try { e.generate(req, model, onProgress) } finally { if (active === e) active = null }
+        }
 
     override fun cancel() { active?.cancel() }
 
-    /** Frees the NPU graphs (≈1.1 GB) until the next generation. */
+    /** Frees the NPU graphs (≈1.1 GB) now, until the next generation. */
     fun release() { qnn?.release() }
+
+    /** Leaving the 生图 page: free the NPU graphs now, or as soon as a running generation ends. */
+    fun releaseWhenIdle() = idle.releaseWhenIdle()
 
     companion object {
         @Volatile private var instance: ImageGenEngines? = null

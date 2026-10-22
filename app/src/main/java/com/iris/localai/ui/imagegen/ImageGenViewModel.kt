@@ -90,7 +90,8 @@ data class ImageGenUi(
 
 class ImageGenViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = ImageGenRepository(app)
-    private val engine: ImageGenEngine = com.iris.localai.imagegen.ImageGenEngines.get(app)
+    private val engines = com.iris.localai.imagegen.ImageGenEngines.get(app)
+    private val engine: ImageGenEngine = engines
     private val _ui = MutableStateFlow(ImageGenUi())
     val ui: StateFlow<ImageGenUi> = _ui.asStateFlow()
     private var job: Job? = null
@@ -194,6 +195,14 @@ class ImageGenViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun showResult(path: String) = _ui.update { it.copy(result = path) }
+
+    /** The 生图 page left the screen: free the NPU graphs (now, or when a running generation ends). */
+    fun onLeave() = engines.releaseWhenIdle()
+
+    override fun onCleared() {
+        engines.releaseWhenIdle()
+        super.onCleared()
+    }
 
     fun runSelfCheck() {
         viewModelScope.launch {

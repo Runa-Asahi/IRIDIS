@@ -87,6 +87,8 @@ internal val SIZE_PRESETS = listOf(512 to 512, 768 to 768, 1024 to 1024, 768 to 
 fun ImageGenScreen(onBack: () -> Unit, onSendToChat: (String) -> Unit, vm: ImageGenViewModel = viewModel()) {
     val s by vm.ui.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    // Leaving 生图 frees the NPU graphs (≈1.1 GB); generate_image keeps its own 60 s idle release.
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { vm.onLeave() } }
     fun toast(t: String) = Toast.makeText(context, t, Toast.LENGTH_SHORT).show()
     var deleting by remember { mutableStateOf<ImageModel?>(null) }
     deleting?.let { m ->

@@ -237,6 +237,7 @@ data class SdQnnFiles(val dir: File) {
 class QnnSdEngine(
     private val modelDir: (ImageModel) -> File?,
     private val loader: QnnGraphLoader,
+    private val perf: HtpPerf = HtpPerf.NONE,
 ) : ImageGenEngine {
     companion object {
         /** Same wording as the 生图 page's ImageGenText.NOT_DOWNLOADED_ERROR. */
@@ -247,7 +248,7 @@ class QnnSdEngine(
     private val lock = Any()
     private var loadedDir: File? = null
     private var graphs: List<QnnGraph> = emptyList()
-    private var pipeline: SdPipeline? = null
+    @Volatile private var pipeline: SdPipeline? = null
     private var tokenizer: ClipTokenizer? = null
     /** metadata.json as shipped in the AI Hub zip (kept for diagnostics; tensor quant comes from the binaries). */
     var metadata: String? = null; private set
@@ -258,15 +259,21 @@ class QnnSdEngine(
             val pixels = synchronized(lock) {
                 val (p, tok) = ensureLoaded(model)
                 if (cancelled.get()) throw SdPipeline.CancelledException()
-                p.generate(
-                    condIds = tok.encode(req.prompt),
-                    uncondIds = tok.encode(req.effectiveNegative),
-                    steps = req.steps,
-                    cfg = req.cfg,
-                    seed = req.seed,
-                    isCancelled = { cancelled.get() },
-                    onStep = onProgress,
-                ) to (p.width to p.height)
+                // HTP to max clocks for the denoising loop only; back to DCVS right after (also on failure/cancel).
+                runCatching { perf.burst() }
+                try {
+                    p.generate(
+                        condIds = tok.encode(req.prompt),
+                        uncondIds = tok.encode(req.effectiveNegative),
+                        steps = req.steps,
+                        cfg = req.cfg,
+                        seed = req.seed,
+                        isCancelled = { cancelled.get() },
+                        onStep = onProgress,
+                    ) to (p.width to p.height)
+                } finally {
+                    runCatching { perf.relax() }
+                }
             }
             encodePng(pixels.first, pixels.second.first, pixels.second.second)
         }
@@ -299,6 +306,9 @@ class QnnSdEngine(
 
     /** Frees the NPU contexts (≈1.1 GB). */
     fun release() = synchronized(lock) { releaseLocked() }
+
+    /** True while the three graphs are loaded. */
+    val isLoaded: Boolean get() = pipeline != null
 
     private fun releaseLocked() {
         graphs.forEach { runCatching { it.close() } }
