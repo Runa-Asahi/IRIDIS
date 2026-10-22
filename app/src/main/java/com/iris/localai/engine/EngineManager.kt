@@ -414,7 +414,15 @@ class EngineManager(
                         "(tier ${useTier.short}${if (applyingTier != null) ", tier reload" else ""}): ${errors.toString().trim().replace('\n', ' ')}")
                     _notices.tryEmit("${model.displayName}：$note")
                 }
-                if (cfg.warmup) runCatching { warmUp(e!!) }
+                // 2.1.8: bounded warm-up (WarmUpGuard): a first generation that never answers no longer
+                // keeps the load in flight forever; its own cancellation propagates (no runCatching).
+                if (cfg.warmup) {
+                    val w = WarmUpGuard.run(onTimeout = { e?.cancel() }) { warmUp(e!!) }
+                    if (w == WarmUpGuard.Outcome.TIMED_OUT) {
+                        Log.w(TAG, "warm-up timed out after ${WarmUpGuard.TIMEOUT_MS}ms: ${model.fileName}")
+                        _notices.tryEmit(WarmUpGuard.timeoutNotice(model.displayName))
+                    }
+                }
                 engine = e
                 lostByReload = null
                 loadedPlan = plan
