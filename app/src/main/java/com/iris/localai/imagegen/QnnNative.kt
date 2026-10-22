@@ -116,6 +116,38 @@ object QnnNative {
     @JvmStatic external fun nativeInfo(handle: Long): String?
     @JvmStatic external fun nativeExecute(handle: Long, inputs: Array<ByteBuffer>, outputs: Array<ByteBuffer>): String?
     @JvmStatic external fun nativeClose(handle: Long)
+    /** HTP DCVS v3 vote on the loaded runtime: burst (true) / relax (false); null or why it was not applied. */
+    @JvmStatic external fun nativeSetPerf(burst: Boolean): String?
+}
+
+/**
+ * HTP clock votes around a generation: [burst] before the first graph runs, [relax] after the last.
+ * Best effort: implementations never throw (a failed vote only means default clocks).
+ */
+interface HtpPerf {
+    fun burst()
+    fun relax()
+
+    companion object {
+        val NONE: HtpPerf = object : HtpPerf {
+            override fun burst() = Unit
+            override fun relax() = Unit
+        }
+    }
+}
+
+/** [HtpPerf] through libiris_imagegen (the vote applies to the process-wide QNN runtime). */
+object NativeHtpPerf : HtpPerf {
+    /** Why the last vote was not applied (null when it was); for diagnostics. */
+    @Volatile var lastError: String? = null; private set
+
+    override fun burst() = vote(true)
+    override fun relax() = vote(false)
+
+    private fun vote(burst: Boolean) {
+        lastError = if (!QnnNative.loaded) QnnNative.loadError
+                    else runCatching { QnnNative.nativeSetPerf(burst) }.getOrElse { it.message ?: it.javaClass.simpleName }
+    }
 }
 
 /** [QnnGraph] backed by libiris_imagegen. */

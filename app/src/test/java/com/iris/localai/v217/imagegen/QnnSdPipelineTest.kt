@@ -300,6 +300,49 @@ class QnnSdPipelineTest {
         assertTrue(te.closed)
     }
 
+    @Test fun engineVotesBurstAroundTheLoopAndRelaxesOnCancel() = runBlocking {
+        val dir = Files.createTempDirectory("sdqnn").toFile()
+        listOf("text_encoder.bin", "unet.bin", "vae.bin").forEach { File(dir, it).writeText("x") }
+        File(dir, "tokenizer").mkdirs()
+        File(dir, "tokenizer/vocab.json").writeText("{}")
+        File(dir, "tokenizer/merges.txt").writeText("#version: 0.2\n")
+        val votes = ArrayList<String>()
+        val unet = FakeUnet()
+        val perf = object : com.iris.localai.imagegen.HtpPerf {
+            override fun burst() { votes.add("burst:${unet.timestepQ.size}") }
+            override fun relax() { votes.add("relax:${unet.timestepQ.size}") }
+        }
+        val graphs = mapOf("text_encoder.bin" to FakeTe(), "unet.bin" to unet, "vae.bin" to FakeVae())
+        lateinit var e: QnnSdEngine
+        e = QnnSdEngine(modelDir = { dir }, loader = { f -> graphs.getValue(f.name) }, perf = perf)
+        val r = e.generate(ImageRequest("a cat", steps = 4, cfg = 7.5f, seed = 1L), ImageCatalog.SD15_QNN) { step, _ -> if (step == 2) e.cancel() }
+        assertTrue(r.exceptionOrNull() is SdPipeline.CancelledException)
+        assertEquals(listOf("burst:0", "relax:4"), votes) // 2 steps × (uncond + cond)
+        assertTrue(e.isLoaded)
+        e.release()
+        assertFalse(e.isLoaded)
+        assertTrue(unet.closed)
+    }
+
+    @Test fun engineSurvivesAThrowingPerfVote() = runBlocking {
+        val dir = Files.createTempDirectory("sdqnn").toFile()
+        listOf("text_encoder.bin", "unet.bin", "vae.bin").forEach { File(dir, it).writeText("x") }
+        File(dir, "tokenizer").mkdirs()
+        File(dir, "tokenizer/vocab.json").writeText("{}")
+        File(dir, "tokenizer/merges.txt").writeText("#version: 0.2\n")
+        val unet = FakeUnet()
+        val perf = object : com.iris.localai.imagegen.HtpPerf {
+            override fun burst() = throw IllegalStateException("setPowerConfig failed")
+            override fun relax() = throw IllegalStateException("setPowerConfig failed")
+        }
+        val graphs = mapOf("text_encoder.bin" to FakeTe(), "unet.bin" to unet, "vae.bin" to FakeVae())
+        lateinit var e: QnnSdEngine
+        e = QnnSdEngine(modelDir = { dir }, loader = { f -> graphs.getValue(f.name) }, perf = perf)
+        val r = e.generate(ImageRequest("a cat", steps = 2, cfg = 7.5f, seed = 1L), ImageCatalog.SD15_QNN) { step, _ -> if (step == 1) e.cancel() }
+        assertTrue(r.exceptionOrNull() is SdPipeline.CancelledException) // the loop ran despite the failed vote
+        assertEquals(2, unet.timestepQ.size)
+    }
+
     companion object {
         const val COND = 0.2f
         const val UNCOND = -0.1f

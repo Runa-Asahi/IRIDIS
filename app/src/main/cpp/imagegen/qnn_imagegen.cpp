@@ -13,6 +13,7 @@
 //   nativeInfo(handle) -> JSON {graph, inputs:[…], outputs:[…]} (name, dims, dtype, bytes, scale, offset)
 //   nativeExecute(handle, ByteBuffer[] inputs, ByteBuffer[] outputs) -> null or error string
 //   nativeClose(handle)
+//   nativeSetPerf(burst) -> null or error string (HTP DCVS v3 vote: burst before a generation, relax after)
 
 #include <jni.h>
 #include <android/log.h>
@@ -36,6 +37,8 @@
 #include "QnnTypes.h"
 #include "System/QnnSystemInterface.h"
 #include "System/QnnSystemContext.h"
+#include "HTP/QnnHtpDevice.h"
+#include "HTP/QnnHtpPerfInfrastructure.h"
 
 #define TAG "iris_imagegen"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -200,6 +203,11 @@ struct Runtime {
     Qnn_LogHandle_t log = nullptr;
     Qnn_BackendHandle_t backend = nullptr;
     Qnn_DeviceHandle_t device = nullptr;
+    // HTP perf infrastructure (null / 0 when the backend does not offer it; never fatal)
+    const QnnHtpDevice_PerfInfrastructure_t* perf = nullptr;
+    uint32_t powerConfigId = 0;
+    bool hasPowerConfig = false;
+    bool burst = false;
     int refs = 0;
 };
 
@@ -207,8 +215,98 @@ std::mutex gMu;          // guards gRt + its refcount
 Runtime* gRt = nullptr;
 thread_local std::string gLastError;
 
+// ---------------------------------------------------------------- HTP performance votes (DCVS v3)
+//
+// Same recipe as the QNN SDK sample app / AI Hub runners: "burst" turns DCVS off and pins bus + core
+// voltage corners at max with a short sleep latency and RPC polling; "relax" hands control back to DCVS in
+// power-saver mode. Every failure is logged and ignored: the graphs still run at the default clocks.
+
+constexpr uint32_t kBurstSleepLatencyUs = 40;     // QNN sample: 40 µs for burst
+constexpr uint32_t kRelaxSleepLatencyUs = 1000;   // 1 ms: lets the DSP sleep between requests
+constexpr uint32_t kBurstRpcControlLatencyUs = 100;
+
+void initPerf(Runtime* rt) {
+    if (!rt->qnn.deviceGetInfrastructure) { LOGI("HTP perf: deviceGetInfrastructure missing (no perf votes)"); return; }
+    QnnDevice_Infrastructure_t infra = nullptr;
+    Qnn_ErrorHandle_t e = rt->qnn.deviceGetInfrastructure(&infra);
+    if (e != QNN_SUCCESS || !infra) { LOGE("HTP perf: deviceGetInfrastructure failed (%lu)", (unsigned long) e); return; }
+    auto* htp = reinterpret_cast<QnnHtpDevice_Infrastructure_t*>(infra);
+    if (htp->infraType != QNN_HTP_DEVICE_INFRASTRUCTURE_TYPE_PERF) { LOGE("HTP perf: unexpected infra type %d", (int) htp->infraType); return; }
+    const QnnHtpDevice_PerfInfrastructure_t* perf = &htp->perfInfra;
+    if (!perf->createPowerConfigId || !perf->setPowerConfig) { LOGE("HTP perf: createPowerConfigId/setPowerConfig missing"); return; }
+    uint32_t id = 0;
+    e = perf->createPowerConfigId(/*deviceId*/ 0, /*coreId*/ 0, &id);
+    if (e != QNN_SUCCESS) { LOGE("HTP perf: createPowerConfigId failed (%lu)", (unsigned long) e); return; }
+    rt->perf = perf;
+    rt->powerConfigId = id;
+    rt->hasPowerConfig = true;
+    LOGI("HTP perf: power config id %u", id);
+}
+
+QnnHtpPerfInfrastructure_PowerConfig_t dcvsConfig(uint32_t id, bool burst) {
+    QnnHtpPerfInfrastructure_PowerConfig_t c;
+    memset(&c, 0, sizeof c);
+    c.option = QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIGOPTION_DCVS_V3;
+    QnnHtpPerfInfrastructure_DcvsV3_t& d = c.dcvsV3Config;
+    d.contextId = id;
+    d.setDcvsEnable = 1;
+    d.dcvsEnable = burst ? 0 : 1;
+    d.powerMode = burst ? QNN_HTP_PERF_INFRASTRUCTURE_POWERMODE_PERFORMANCE_MODE
+                        : QNN_HTP_PERF_INFRASTRUCTURE_POWERMODE_POWER_SAVER_MODE;
+    d.setSleepLatency = 1;
+    d.sleepLatency = burst ? kBurstSleepLatencyUs : kRelaxSleepLatencyUs;
+    d.setSleepDisable = 1;
+    d.sleepDisable = 0;
+    d.setBusParams = 1;
+    d.setCoreParams = 1;
+    if (burst) {
+        d.busVoltageCornerMin = d.busVoltageCornerTarget = d.busVoltageCornerMax = DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
+        d.coreVoltageCornerMin = d.coreVoltageCornerTarget = d.coreVoltageCornerMax = DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
+    } else {
+        d.busVoltageCornerMin = d.coreVoltageCornerMin = DCVS_VOLTAGE_VCORNER_MIN_VOLTAGE_CORNER;
+        d.busVoltageCornerTarget = d.coreVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_SVS;
+        d.busVoltageCornerMax = d.coreVoltageCornerMax = DCVS_VOLTAGE_VCORNER_NOM;
+    }
+    return c;
+}
+
+/** Votes burst / relax on [rt]. Returns an empty string on success. Caller holds gMu. */
+std::string setPerfLocked(Runtime* rt, bool burst) {
+    if (!rt) return "no QNN runtime";
+    if (!rt->hasPowerConfig || !rt->perf || !rt->perf->setPowerConfig) return "HTP perf infrastructure unavailable";
+    QnnHtpPerfInfrastructure_PowerConfig_t dcvs = dcvsConfig(rt->powerConfigId, burst);
+    QnnHtpPerfInfrastructure_PowerConfig_t latency;
+    memset(&latency, 0, sizeof latency);
+    latency.option = QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIGOPTION_RPC_CONTROL_LATENCY;
+    latency.rpcControlLatencyConfig = burst ? kBurstRpcControlLatencyUs : 0;
+    QnnHtpPerfInfrastructure_PowerConfig_t polling;
+    memset(&polling, 0, sizeof polling);
+    polling.option = QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIGOPTION_RPC_POLLING_TIME;
+    polling.rpcPollingTimeConfig = burst ? QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIG_MAX_RPC_POLLING_TIME : 0;
+
+    // DCVS first and on its own: older backends reject unknown options in a batch.
+    const QnnHtpPerfInfrastructure_PowerConfig_t* only[] = {&dcvs, nullptr};
+    Qnn_ErrorHandle_t e = rt->perf->setPowerConfig(rt->powerConfigId, only);
+    if (e != QNN_SUCCESS) {
+        std::string err = fmt("setPowerConfig(DCVS v3, %s) failed (%lu)", burst ? "burst" : "relax", (unsigned long) e);
+        LOGE("HTP perf: %s", err.c_str());
+        return err;
+    }
+    const QnnHtpPerfInfrastructure_PowerConfig_t* rpc[] = {&latency, &polling, nullptr};
+    e = rt->perf->setPowerConfig(rt->powerConfigId, rpc);
+    if (e != QNN_SUCCESS) LOGI("HTP perf: RPC latency/polling not applied (%lu)", (unsigned long) e); // DCVS vote stands
+    rt->burst = burst;
+    LOGI("HTP perf: %s", burst ? "burst" : "relax");
+    return {};
+}
+
 void freeRuntime(Runtime* rt) {
     if (!rt) return;
+    if (rt->hasPowerConfig && rt->perf) {
+        if (rt->burst) setPerfLocked(rt, false);
+        if (rt->perf->destroyPowerConfigId) rt->perf->destroyPowerConfigId(rt->powerConfigId);
+        rt->hasPowerConfig = false;
+    }
     if (rt->device && rt->qnn.deviceFree) rt->qnn.deviceFree(rt->device);
     if (rt->backend && rt->qnn.backendFree) rt->qnn.backendFree(rt->backend);
     if (rt->log && rt->qnn.logFree) rt->qnn.logFree(rt->log);
@@ -230,7 +328,7 @@ void* openIn(const std::string& dir, const char* name, int flags, std::string& e
  * Loads the QNN HTP backend from [dir] and creates the backend + HTP device.
  * stage: 0 none, 1 libraries + interfaces, 2 backend, 3 device. Returns nullptr with err set on failure.
  */
-Runtime* createRuntime(const std::string& dir, std::string& err, int* stage) {
+Runtime* createRuntime(const std::string& dir, std::string& err, int* stage, bool withPerf) {
     *stage = 0;
     // The DSP side (libQnnHtpV<arch>Skel.so) is found by FastRPC through ADSP_LIBRARY_PATH.
     std::string adsp = dir + ";/vendor/dsp/cdsp;/vendor/lib/rfsa/adsp;/system/lib/rfsa/adsp;/dsp";
@@ -303,6 +401,7 @@ Runtime* createRuntime(const std::string& dir, std::string& err, int* stage) {
         if (e != QNN_SUCCESS) { err = fmt("deviceCreate failed (%lu)", (unsigned long) e); freeRuntime(rt.release()); return nullptr; }
     }
     *stage = 3;
+    if (withPerf) initPerf(rt.get()); // non-fatal: logs and leaves hasPowerConfig false
     return rt.release();
 }
 
@@ -314,7 +413,7 @@ Runtime* acquireRuntime(const std::string& dir, std::string& err) {
         return gRt;
     }
     int stage = 0;
-    gRt = createRuntime(dir, err, &stage);
+    gRt = createRuntime(dir, err, &stage, /*withPerf*/ true);
     if (gRt) gRt->refs = 1;
     return gRt;
 }
@@ -471,7 +570,10 @@ std::string modelInfo(Model* m) {
 
 // ---------------------------------------------------------------- CDSP facts via FastRPC (libcdsprpc.so)
 
-// From the Hexagon SDK's remote.h (public FastRPC ABI).
+// From the Hexagon SDK's remote.h (public FastRPC ABI); checked 2026-10-22 against quic/fastrpc inc/remote.h:
+// enum handle_control_req_id {RESERVED, CONTROL_LATENCY, GET_DSP_INFO=2, …}, enum remote_dsp_attributes
+// {DOMAIN_SUPPORT, UNSIGNED_PD_SUPPORT=1, HVX_64B, HVX_128B, VTCM_PAGE, VTCM_COUNT, ARCH_VER=6, …},
+// CDSP_DOMAIN_ID 3, struct remote_dsp_capability {domain, attribute_ID, capability} (3 × uint32).
 constexpr uint32_t kDsprpcGetDspInfo = 2;   // handle_control_req_id DSPRPC_GET_DSP_INFO
 constexpr uint32_t kAttrUnsignedPd = 1;     // remote_dsp_attributes UNSIGNED_PD_SUPPORT
 constexpr uint32_t kAttrArchVer = 6;        // remote_dsp_attributes ARCH_VER
@@ -514,7 +616,7 @@ std::string probe(const std::string& dir) {
             deviceOk = true;
         } else {
             int stage = 0;
-            Runtime* rt = createRuntime(dir, err, &stage);
+            Runtime* rt = createRuntime(dir, err, &stage, /*withPerf*/ false);
             backendOk = stage >= 2;
             deviceOk = stage >= 3;
             freeRuntime(rt);
@@ -559,6 +661,11 @@ std::string execute(JNIEnv* env, Model* m, jobjectArray ins, jobjectArray outs) 
     return {};
 }
 
+std::string setPerf(bool burst) {
+    std::lock_guard<std::mutex> lk(gMu);
+    return setPerfLocked(gRt, burst);
+}
+
 } // namespace
 
 // ---------------------------------------------------------------- JNI
@@ -593,6 +700,11 @@ JNIEXPORT jstring JNICALL JNI_FN(nativeExecute)(JNIEnv* env, jobject, jlong hand
     auto* m = (Model*) (intptr_t) handle;
     if (!m) return env->NewStringUTF("invalid handle");
     std::string e = execute(env, m, inputs, outputs);
+    return e.empty() ? nullptr : env->NewStringUTF(e.c_str());
+}
+
+JNIEXPORT jstring JNICALL JNI_FN(nativeSetPerf)(JNIEnv* env, jobject, jboolean burst) {
+    std::string e = setPerf(burst == JNI_TRUE);
     return e.empty() ? nullptr : env->NewStringUTF(e.c_str());
 }
 
