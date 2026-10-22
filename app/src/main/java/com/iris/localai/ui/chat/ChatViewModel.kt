@@ -806,8 +806,51 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         append(ChatMessage(role = Role.ASSISTANT, content = reply))
     }
 
-    /** A reply is streaming, or a send is still waiting for the model to finish loading. */
-    private fun busy() = state.value.isGenerating || genJob?.isActive == true
+    /**
+     * A reply is streaming, or a send is still waiting for the model to finish loading.
+     * 2.1.8: read from the raw sources ([ReplyBusy]), not the derived `state` (it lags a dispatch,
+     * so the queue drain right after a reply saw "generating" and a 「待回复」 waited forever).
+     */
+    private fun busy() = ReplyBusy.of(streamingId.value, genJob?.isActive == true)
+
+    /** 2.1.8: the running reply's [ReplyWatchdog] (null when none runs). */
+    @Volatile private var replyWatchdog: ReplyWatchdog? = null
+    /** 2.1.8: replies ended by the watchdog: their error survives the reply's own cleanup. */
+    private val stalledIds = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    /**
+     * 2.1.8 「一发送就卡住」: the reply [job] showed no sign of life past the watchdog's limit. The
+     * bubble says so, the engine and the job are cancelled and the screen is free again; a job that
+     * does not end within [ReplyWatchdog.DETACH_WAIT_MS] is detached (busy cleared anyway).
+     */
+    private suspend fun onReplyStalled(job: Job, verdict: ReplyWatchdog.Verdict, replyId: String?) {
+        android.util.Log.w(GEN_TAG, "watchdog: ${verdict.phase} silent ${verdict.idleMs}ms → stopping the reply (${verdict.message})")
+        if (replyId != null) {
+            stalledIds.add(replyId)
+            conversation.update { conv ->
+                conv.copy(messages = conv.messages.map { if (it.id == replyId) it.copy(error = STALL_ERROR) else it })
+            }
+            persist()
+        } else notice.value = STALL_ERROR
+        stopAsked = true
+        warmJob?.cancel()
+        c.engine.cancel(engineOwner)
+        job.cancel()
+        if (replyId != null && streamingId.value == replyId) streamingId.value = null
+        if (replyId != null && _stream.value?.id == replyId) _stream.value = null
+        _replyStatus.value = null
+        awaitingEngine = false
+        act(null)
+        val ended = kotlinx.coroutines.withTimeoutOrNull(ReplyWatchdog.DETACH_WAIT_MS) { job.join() } != null
+        if (!ended && genJob === job) {
+            android.util.Log.w(GEN_TAG, "watchdog: reply did not end ${ReplyWatchdog.DETACH_WAIT_MS}ms after cancel → detached")
+            genJob = null
+            agentRunning = false
+            if (replyWatchdog != null) replyWatchdog = null
+            adoptViewing()
+            drainQueue()
+        }
+    }
 
     /** 1.10.13: set by 停止 for the running reply; text arriving after it is dropped. */
     @Volatile private var stopAsked = false
@@ -916,14 +959,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
             val cfg = c.engine.effective().let { it.copy(temperature = 0.3f, maxNewTokens = 512, repeatPenalty = 1.05f) }
             val out = StringBuilder()
             var ok = true
+            val summaryPrompt = com.iris.localai.util.ContextPlanner.summaryPrompt(conv.summary, plan.toSummarize)
+            replyWatchdog?.prompt(summaryPrompt.sumOf { com.iris.localai.util.TokenEstimator.message(it.content) })
             c.engine.generate(
-                com.iris.localai.util.ContextPlanner.summaryPrompt(conv.summary, plan.toSummarize),
+                summaryPrompt,
                 c.engine.samplingFor(disableThinking = true, cfg = cfg),
                 Requester.CHAT,
                 engineOwner,
             ).collect { ev ->
                 when (ev) {
-                    is GenEvent.Piece -> out.append(ev.text)
+                    is GenEvent.Piece -> { replyWatchdog?.touch(); out.append(ev.text) }
                     is GenEvent.Done -> if (ev.reason == StopReason.ERROR || ev.reason == StopReason.CANCELLED) ok = false
                 }
             }
@@ -945,6 +990,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         stopAsked = false
         // 2.0.x: regenerate — the new bubble carries the previous reply's versions.
         val base = nextReplyBase.also { nextReplyBase = null }
+        // 2.1.8: a reply that shows no sign of life is ended with a reason (ReplyWatchdog).
+        val watchdog = ReplyWatchdog()
+        replyWatchdog = watchdog
+        val bubbleId = java.util.concurrent.atomic.AtomicReference<String?>(null)
+        val st0 = c.engine.state.value
+        val modelPending = st0 !is EngineState.Ready
+        if (modelPending) watchdog.waitingForModel()
+        // 2.1.8: no model ready (loading, or loaded on demand): the bubble shows right away with
+        // 「正在加载模型…」 so 停止 is there. Nothing to load at all keeps the old notice path.
+        val showLoading = modelPending && (st0 is EngineState.Loading || c.engine.readyModel != null || c.engine.defaultModel() != null)
         val job = viewModelScope.launch {
             // 1.7.7: the reply bubble exists as soon as there is something to show: right away when a
             // tier reload makes the request wait (with 「正在重载模型…」), otherwise once the model is ready.
@@ -956,26 +1011,32 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
                 bubble = r
                 conversation.update { it.copy(messages = it.messages + r) }
                 streamingId.value = r.id
+                bubbleId.set(r.id)
             }
             awaitingEngine = true
             var started = false
             try {
+                if (showLoading) { bubble(); _replyStatus.value = LOADING_STATUS }
                 // One registered request from here to the end of the reply: a tier reload cannot slip
                 // in between ensureLoaded and generate any more; one that is running is waited for.
                 c.engine.request(onWaiting = { waiting ->
-                    if (waiting) { bubble(); _replyStatus.value = RELOADING_STATUS } else _replyStatus.value = null
+                    if (waiting) { bubble(); watchdog.waitingForModel(); _replyStatus.value = RELOADING_STATUS } else _replyStatus.value = null
                 }) {
-                    if (!c.engine.ensureLoaded()) {
+                    val loaded = c.engine.ensureLoaded()
+                    if (_replyStatus.value == LOADING_STATUS) _replyStatus.value = null
+                    if (!loaded) {
                         val failed = (c.engine.state.value as? EngineState.Failed)?.message
                         val b = bubble
                         if (b != null) {
                             // The user saw a bubble waiting: end it with the reason instead of leaving it.
                             conversation.update { conv ->
                                 conv.copy(messages = conv.messages.map {
-                                    if (it.id == b.id) it.copy(error = failed?.let { m -> "模型重新加载失败：$m" } ?: "模型未加载") else it
+                                    if (it.id != b.id) it
+                                    else if (modelPending) it.copy(error = failed?.let { m -> "$LOAD_FAILED：$m" } ?: LOAD_FAILED)
+                                    else it.copy(error = failed?.let { m -> "模型重新加载失败：$m" } ?: "模型未加载")
                                 })
                             }
-                            streamingId.value = null
+                            if (streamingId.value == b.id) streamingId.value = null
                             persist()
                         } else {
                             notice.value = failed?.let { "模型加载失败：$it" } ?: "请先在顶部选择并加载一个模型"
@@ -983,6 +1044,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
                         return@request
                     }
                     started = true
+                    watchdog.prompt()
                     // 1.9.0: 智能体 mode. 2.1.7: voice uses tools too — 智能体 on, or a spoken task (VoiceRouting).
                     val agentOn = c.agent.settings.current.agentMode
                     val viaAgent = when (requester) {
@@ -1019,11 +1081,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         }
         genJob = job
         job.invokeOnCompletion {
+            if (replyWatchdog === watchdog) replyWatchdog = null
             viewModelScope.launch {
                 if (genJob === job || genJob?.isActive != true) adoptViewing()
                 // 2.1.7: answer what was queued while this reply ran.
                 if (genJob === job) drainQueue()
             }
+        }
+        // 2.1.8: watch the reply until it ends; load progress counts as a sign of life.
+        viewModelScope.launch {
+            val loadTouch = launch { c.engine.state.collect { if (it is EngineState.Loading) watchdog.touch() } }
+            val verdict = try { watchdog.watch(job) } finally { loadTouch.cancel() }
+            if (verdict != null) onReplyStalled(job, verdict, bubbleId.get())
         }
         return job
     }
@@ -1091,7 +1160,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
                             totalMs = if (done) timer.totalMs() else 0L,
                             interrupted = result?.reason == StopReason.CANCELLED,
                             error = thinkOnlyNote ?: result?.takeIf { f -> f.reason == StopReason.ERROR || f.reason == StopReason.CONTEXT_FULL }?.error
-                                ?.takeIf { raw.isBlank() },
+                                ?.takeIf { raw.isBlank() }
+                                ?: it.error.takeIf { _ -> reply.id in stalledIds },
                         )
                     })
                 }
@@ -1136,6 +1206,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
                 val p = plan!!
                 val sampling = c.engine.samplingFor(noThinking, contextShift = p.contextShift, keepTokens = p.keepTokens)
                 promptLog.record(reply.id, if (requester == Requester.VOICE) com.iris.localai.voice.VoiceStyle.withVoiceNote(p.messages) else p.messages)
+                replyWatchdog?.prompt(p.estimatedTokens)
                 act(if (answerOnly) "继续生成回答" else if (p.messages.lastOrNull { it.role == PromptMessage.USER }?.let { pickImages(it) } == true) "读取图片与提示（视觉编码 + 预填充）" else "读取提示（预填充）")
                 c.engine.generate(
                     withImages(if (requester == Requester.VOICE) com.iris.localai.voice.VoiceStyle.withVoiceNote(p.messages) else p.messages),
@@ -1146,6 +1217,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
                     when (ev) {
                         is GenEvent.Piece -> {
                             com.iris.localai.service.GenerationMonitor.tick()
+                            replyWatchdog?.output()
                             if (meter != null && meterStop == null) {
                                 val v = meter.onPiece(ev.text)
                                 if (v != com.iris.localai.util.ThinkingBudget.Verdict.NONE) {
@@ -1260,7 +1332,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
                 if (result == null) result = GenEvent.Done(StopReason.CANCELLED, null)
                 timer.finish()
                 publish(true)
-                streamingId.value = null
+                if (streamingId.value == reply.id) streamingId.value = null
                 if (background) com.iris.localai.service.GenerationMonitor.finish(convId, timer.chars, result?.reason == StopReason.CANCELLED)
                 result?.takeIf { requester == Requester.CHAT && it.reason != StopReason.CANCELLED }
                     ?.let { _replyFinished.tryEmit(it.reason != StopReason.ERROR && it.error == null) }
@@ -1503,10 +1575,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
             agentCalls++
             val stepTag = if (agentCalls > 1) "第 $agentCalls 轮 · " else ""
             act(stepTag + "读取提示（预填充）")
+            replyWatchdog?.prompt(messages.sumOf { com.iris.localai.util.TokenEstimator.message(it.content) })
             c.engine.generate(withImages(messages), sampling, Requester.CHAT, engineOwner).collect { ev ->
                 when (ev) {
                     is GenEvent.Piece -> {
                         com.iris.localai.service.GenerationMonitor.tick()
+                        replyWatchdog?.output()
                         if (cut) return@collect
                         val clean = stopFilter.push(ev.text)
                         if (stopFilter.stopped) { cut = true; c.engine.cancel(engineOwner) }
@@ -1689,7 +1763,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
                         outputMs = timer.outputMs(),
                         totalMs = timer.totalMs(),
                         interrupted = cancelled,
-                        error = err?.takeIf { finalText.isBlank() },
+                        error = err?.takeIf { finalText.isBlank() } ?: it.error.takeIf { _ -> reply.id in stalledIds },
                     )
                 })
             }
@@ -1697,7 +1771,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
             agentTranscript = o?.transcript?.takeIf { it.isNotEmpty() && !cancelled && finalText.isNotBlank() }
                 ?.let { AgentTranscript(convId, reply.id, finalText, it) }
             _stream.value = null
-            streamingId.value = null
+            if (streamingId.value == reply.id) streamingId.value = null
             if (background) com.iris.localai.service.GenerationMonitor.finish(convId, timer.chars, cancelled)
             if (!cancelled && voiceOut == null) _replyFinished.tryEmit(err == null)
             conversation.update { it.copy(updatedAt = System.currentTimeMillis()) }
@@ -1916,6 +1990,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app), VoiceChatBridge {
         const val GEN_TAG = "IrisGen"
         /** 1.7.7: shown in the reply bubble while the request waits for a tier reload. */
         const val RELOADING_STATUS = "正在重载模型…"
+        /** 2.1.8: the reply waits for a model load (bubble shown right away, 停止 works). */
+        const val LOADING_STATUS = "正在加载模型…"
+        const val LOAD_FAILED = "模型加载失败"
+        /** 2.1.8: shown on a reply the watchdog ended. */
+        const val STALL_ERROR = "长时间没有输出，已停止。可重试或换模型"
         const val PERSIST_MS = 3_000L
         /** 1.9.0: reply cap per agent turn (tool calls are short; small windows need the room for results). */
         const val AGENT_MAX_NEW = 1536
